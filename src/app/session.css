@@ -37,17 +37,26 @@
   font: 700 13px/1.2 var(--ui);
 }
 
+.head .heading {
+  min-width: 0;
+  max-width: 40%;
+}
+
 .head .sub {
   font: 500 11.5px/1.3 var(--ui);
   color: var(--ink-dim);
   margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .head .grow {
   flex: 1;
 }
 
-.head a.quit {
+.head a.quit,
+.head button.quit {
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--ink-dim);
@@ -55,11 +64,94 @@
   border-radius: 8px;
   font: 600 11px/1 var(--ui);
   text-decoration: none;
+  white-space: nowrap;
 }
 
-.head a.quit:hover {
+.head a.quit:hover,
+.head button.quit:hover {
   color: var(--ink);
   border-color: #3a4250;
+}
+
+.head button.quit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.head button.quit.danger {
+  color: #ffd0cb;
+  border-color: #6b2f28;
+  background: var(--accent-soft);
+}
+
+.head .asking {
+  display: flex;
+  gap: 6px;
+}
+
+/* --------------------------------------------------------- sprint track */
+
+/*
+ * The plan, as a row of marks. The learner can see how many scenes are left and
+ * which one is running, which is what makes a half hour feel bounded rather than
+ * open-ended.
+ */
+.track {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-shrink: 0;
+}
+
+.track li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font: 600 10px/1 var(--ui);
+  color: var(--ink-faint);
+}
+
+.track li[data-state="active"] {
+  color: var(--ink);
+  border-color: #3f4b5e;
+  background: #1d2530;
+}
+
+.track li[data-state="done"] {
+  color: #8fd6a8;
+  border-color: #24462f;
+  background: #14251a;
+}
+
+.track .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.track[data-full="1"] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.track[data-full="1"] li {
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
+.track .what {
+  font-weight: 500;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .latency {
@@ -177,6 +269,183 @@
   font-family: var(--jp);
   color: #bfe7cc;
   font-size: 13px;
+}
+
+/* The learner's own hesitation, recorded on the turn it happened on. */
+.timing {
+  font: 500 10.5px/1 var(--ui);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+
+/*
+ * An exchange, plus the debrief that follows the last turn of a scene. Grouping
+ * them keeps the card anchored to the scene it belongs to instead of floating
+ * between two unrelated messages.
+ */
+.exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.quiet-empty {
+  font: 500 12px/1 var(--ui);
+  color: var(--ink-faint);
+  text-align: center;
+  margin: 40px 0;
+}
+
+/* ---------------------------------------------------------------- debrief */
+
+/*
+ * Green rather than a fourth marker colour: it is not a word and not a fumble,
+ * it is the app stepping out of the conversation to say what happened. The border
+ * keeps it from reading as a turn.
+ */
+.debrief {
+  align-self: flex-start;
+  max-width: min(620px, 92%);
+  background: #101a14;
+  border: 1px solid #24462f;
+  border-radius: 13px;
+  border-top-left-radius: 4px;
+  padding: 13px 16px 14px;
+  font: 500 12.5px/1.55 var(--ui);
+  color: #cfe4d5;
+}
+
+.debrief header {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+
+.debrief .sprint-no {
+  font: 700 10px/1 var(--ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8fd6a8;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid #24462f;
+  white-space: nowrap;
+}
+
+.debrief .where {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debrief .lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.debrief .lines li::before {
+  content: "—";
+  color: #4f6d5a;
+  margin-right: 7px;
+}
+
+.debrief .words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.debrief .word {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  background: var(--new-soft);
+  box-shadow: inset 0 0 0 1px #1d3d63;
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+
+.debrief .word b {
+  font: 700 13px/1.3 var(--jp);
+  color: var(--new-ink);
+}
+
+.debrief .word i {
+  font: 400 10.5px/1.3 var(--jp);
+  font-style: normal;
+  color: #7fa8d8;
+}
+
+.debrief .quiet-list {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid #1d3324;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.debrief .quiet-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  flex-wrap: wrap;
+}
+
+.debrief .quiet-row .said {
+  color: var(--ink-faint);
+}
+
+.debrief .quiet-row .arrow {
+  color: #4f6d5a;
+  font-size: 11px;
+}
+
+.debrief .quiet-row .phrase {
+  color: #bfe7cc;
+}
+
+/* ------------------------------------------------------------------- wrap */
+
+.wrap {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 22px 20px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wrap h2 {
+  margin: 0;
+  font: 700 16px/1.3 var(--ui);
+}
+
+.wrap p {
+  margin: 0;
+  font: 500 13px/1.6 var(--ui);
+  color: var(--ink-dim);
+}
+
+.wrap .again {
+  margin-top: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: 700 13px/1 var(--ui);
+  padding: 13px 20px;
+  border-radius: 10px;
+  text-decoration: none;
 }
 
 .thinking {
@@ -517,59 +786,135 @@
   white-space: nowrap;
 }
 
-/* ------------------------------------------------------------ start card */
+/* ------------------------------------------------------------ start page */
 
 .start {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 24px;
+  min-height: 100%;
+  padding: 40px 24px 56px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
 }
 
-.start-card {
-  max-width: 430px;
-  width: 100%;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 28px;
+.start-head {
+  max-width: 560px;
+  text-align: center;
 }
 
-.start-card h1 {
-  margin: 0 0 8px;
-  font: 700 20px/1.3 var(--ui);
+.start-head h1 {
+  margin: 0 0 10px;
+  font: 700 22px/1.3 var(--ui);
 }
 
-.start-card p {
-  margin: 0 0 20px;
-  font: 500 13.5px/1.6 var(--ui);
+.start-head .lede {
+  margin: 0;
+  font: 500 13.5px/1.65 var(--ui);
   color: var(--ink-dim);
 }
 
-.start-card .goal {
-  font-family: var(--jp);
-  color: var(--ink);
-  font-size: 14px;
-  margin: 0 0 20px;
+.scenarios {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.start-card button {
-  width: 100%;
+.scenario {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.scenario .about {
+  flex: 1;
+  min-width: 0;
+}
+
+.scenario h2 {
+  margin: 0 0 5px;
+  font: 700 15px/1.3 var(--jp);
+}
+
+.scenario .about > p {
+  margin: 0 0 10px;
+  font: 500 12.5px/1.55 var(--jp);
+  color: var(--ink-dim);
+}
+
+.scenario .scenes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  counter-reset: scene;
+}
+
+.scenario .scenes li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: 500 12px/1.45 var(--ui);
+  color: var(--ink-dim);
+}
+
+.scenario .scenes li::before {
+  counter-increment: scene;
+  content: counter(scene);
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font: 600 9.5px/14px var(--ui);
+  text-align: center;
+  color: var(--ink-faint);
+}
+
+.scenario .scenes .goal {
+  color: var(--ink-faint);
+  font-family: var(--jp);
+  font-size: 11.5px;
+}
+
+.scenario button {
+  flex-shrink: 0;
   background: var(--accent);
   border: 0;
   color: #fff;
-  font: 700 14px/1 var(--ui);
-  padding: 14px 18px;
+  font: 700 13px/1 var(--ui);
+  padding: 13px 20px;
   border-radius: 10px;
 }
 
-.start-card button:disabled {
-  opacity: 0.5;
+.scenario button:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.start-card .error {
-  margin-top: 14px;
-  font: 500 12px/1.5 var(--ui);
+.start .error {
+  margin: 0;
+  font: 500 12.5px/1.5 var(--ui);
   color: #ffd0cb;
+}
+
+@media (max-width: 560px) {
+  .scenario {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .scenario button {
+    width: 100%;
+  }
 }

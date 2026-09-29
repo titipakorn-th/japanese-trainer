@@ -14,6 +14,14 @@ Use these terms exactly. They are the load-bearing concepts of the product.
   one continuous one.
 - **Turn** — one exchange within a sprint: the partner speaks, the learner
   replies. A sprint is many turns.
+- **Stance** — how the partner is behaving on one turn, decided from the
+  learner's own words before the model is called: follow up (`plain`), make it
+  harder because the learner is coping (`harder`), slow down and rephrase because
+  they are lost (`slow`), or hand over the word they said they did not have
+  (`give-word`). The partner's good conduct is four stances, not one prompt.
+- **Debrief** — the short account of what happened in a sprint, written from the
+  committed turns alone and shown in the transcript as the sprint ends. It
+  reports measurements, never an opinion of the learner.
 - **Fumble** — a moment the learner failed to produce the right word or form:
   an abandoned turn, a phrase compressed past naturalness, hedging around a
   word they clearly wanted, or a form a native speaker wouldn't use.
@@ -36,6 +44,8 @@ Use these terms exactly. They are the load-bearing concepts of the product.
 
 - A **Session** contains several **Sprints**.
 - A **Sprint** is a sequence of **Turns**.
+- A **Sprint** ends with a **Debrief**.
+- A **Turn** happens under exactly one **Stance**.
 - A **Turn** can produce zero or more **Fumbles**.
 - A **Fumble** adds a word to the **Fumble Deck**.
 - The **Fumble Deck** constrains which words future **Sessions** must require.

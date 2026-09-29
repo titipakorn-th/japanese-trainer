@@ -1,9 +1,10 @@
 /**
  * Types shared by the server and the browser.
  *
- * A Session is one practice sitting. A Turn is one exchange within it: the
- * partner speaks, the learner replies. The server owns both — the client renders
- * a projection of this, never the truth.
+ * A Session is one practice sitting. It is a sequence of Sprints, each one a
+ * scene with a single persona, situation, and goal. A Sprint is a sequence of
+ * Turns. The server owns all of it — the client renders a projection of this,
+ * never the truth.
  */
 
 export type MarkerKind = "new" | "fumble" | "grammar";
@@ -29,31 +30,168 @@ export interface Turn {
   id: number;
   seq: number;
   role: "partner" | "learner";
+  /** Which sprint this turn belongs to. Null only on pre-sprint sessions. */
+  sprintId: string | null;
   /** Display text. The model's trailing metadata block is already stripped. */
   text: string;
   /** The natural phrasing of a learner turn, shown quietly beneath it. */
   naturalPhrasing: string | null;
   markers: Marker[];
+  /**
+   * Learner turns only: ms from the partner finishing its last line to the
+   * learner submitting. The hesitation signal, and the reason it is measured in
+   * the browser — the server cannot see when the text became readable.
+   */
+  responseMs: number | null;
   createdAt: number;
 }
+
+export type SessionStatus = "active" | "ended";
 
 export interface Session {
   id: string;
   createdAt: number;
+  endedAt: number | null;
+  /** The scenario family this session was drawn from. */
   scenario: Scenario;
-  status: "active" | "ended";
+  status: SessionStatus;
 }
 
+/**
+ * A word the scene is built around, and the line the partner opens the scene
+ * with. The opening always contains the word, so the prompt's one worked example
+ * can demonstrate a marker that resolves against the text in front of it.
+ */
+export interface WordSeed {
+  surface: string;
+  reading: string;
+  meaning: string;
+  example: string;
+}
+
+/**
+ * One scene, briefable on its own. A Sprint is a SprintBrief that has been
+ * entered: it has a clock, a turn count, and eventually a debrief.
+ */
+export interface SprintBrief {
+  slug: string;
+  /** Who the partner is, in the form the prompt can use verbatim. */
+  persona: string;
+  place: string;
+  /** What is happening right now, before the learner says anything. */
+  situation: string;
+  /** The one thing this scene is for. The partner does not leave it. */
+  goal: string;
+  /** The partner's opening line, in this voice, in this place. */
+  openingLine: string;
+  /** A quiet correction that would make sense in this scene. */
+  correctionLine: string;
+  /** The New Word this scene introduces. */
+  word: WordSeed;
+}
+
+/** A family of scenes. A session is a run of sprints drawn from one of these. */
 export interface Scenario {
   slug: string;
   title: string;
+  /** The picker's one-liner: what this is and when to pick it. */
+  blurb: string;
+  /** The scenes in this family, in order. A session runs four to six of them. */
+  sprints: SprintBrief[];
+}
+
+/**
+ * Why a sprint stopped. Shown in the debrief, and the only honest account of it.
+ *
+ * `migrated` is the one reason that is not a decision: it is how a session
+ * recorded before sprints existed is given a sprint to hang its turns on.
+ */
+export type SprintEnding = "budget" | "sprint-clock" | "session-clock" | "abandoned" | "migrated";
+
+export interface Sprint {
+  id: string;
+  sessionId: string;
+  /** 1-based position in the session. */
+  seq: number;
+  brief: SprintBrief;
+  /**
+   * `planned` is written when the session starts and nobody has entered the
+   * scene yet. Distinguishing it from `active` is the difference between "the
+   * partner is in this scene now" and "this scene is next", and a session whose
+   * plan is a list of scenes needs to say which one is which.
+   */
+  status: "planned" | "active" | "closed";
+  /** Learner turns the sprint runs before it closes on its own. */
+  target: number;
+  /** When the learner entered it. Null for a planned sprint nobody has opened. */
+  startedAt: number | null;
+  endedAt: number | null;
+  endedBy: SprintEnding | null;
+  debrief: Debrief | null;
+}
+
+/** One line of a debrief. Rendered as written, in order. */
+export interface DebriefLine {
+  kind: "pace" | "words" | "corrections" | "note";
+  text: string;
+}
+
+/**
+ * What happened in a sprint, built from the turns that were actually committed.
+ *
+ * Nothing here is the model's opinion of the learner: it is the transcript and
+ * the measurements of the transcript. Fumble capture is its own slice, so the
+ * deck is not in it yet.
+ */
+export interface Debrief {
+  sprintId: string;
+  /** Render the card immediately after the turn with this `seq`. */
+  afterSeq: number;
+  seq: number;
+  title: string;
   place: string;
   goal: string;
+  startedAt: number;
+  endedAt: number;
+  endedBy: SprintEnding;
+  turnCount: number;
+  /** Mean learner response time over the sprint, if it was measured at all. */
+  avgResponseMs: number | null;
+  /** Distinct New Words the partner introduced in this sprint. */
+  words: Pick<Marker, "surface" | "reading" | "meaning">[];
+  /** Each quiet correction the partner gave, with what it replaced. */
+  corrections: { said: string; natural: string }[];
+  lines: DebriefLine[];
 }
 
 export interface SessionState {
   session: Session;
   turns: Turn[];
+  sprints: Sprint[];
+  /** The live sprint, or null once the session has ended, or never began. */
+  activeSprint: Sprint | null;
+  /** The walls the app is holding itself to, so the client can show them. */
+  pacing: Pacing;
+}
+
+/** The turn budgets and clocks a session runs on. See `pacing.ts`. */
+export interface Pacing {
+  /** Learner turns per sprint before it closes on its own. */
+  sprintTurns: number;
+  /** ms a sprint may run before it closes on its own. */
+  sprintMs: number;
+  /** ms a whole session may run before it ends on its own. */
+  sessionMs: number;
+}
+
+/** One committed exchange, as the client needs it to redraw itself. */
+export interface Committed {
+  learnerTurn: Turn | null;
+  turn: Turn;
+  sprint: Sprint;
+  /** Set only on the exchange that closed the sprint. */
+  debrief: Debrief | null;
+  status: SessionStatus;
 }
 
 /** Frames sent over the turn stream, in order. */
@@ -62,7 +200,13 @@ export type TurnEvent =
   | { t: "delta"; v: string }
   /** A first attempt streamed something unusable; drop it and take the retry. */
   | { t: "reset" }
-  /** The turn is persisted. Everything before this is provisional. */
-  | { t: "done"; turn: Turn; learnerTurn: Turn | null; firstSentenceMs: number }
+  /**
+   * Something is committed, and here is the state to render after it.
+   *
+   * A request can produce more than one of these: crossing a sprint boundary
+   * commits the closing exchange, then the next sprint's opening, and the debrief
+   * belongs between them.
+   */
+  | { t: "done"; turn: Turn; learnerTurn: Turn | null; firstSentenceMs: number } & Committed
   /** The turn failed. Nothing was written; the conversation did not advance. */
   | { t: "error"; message: string; retryable: boolean };

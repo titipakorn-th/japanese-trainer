@@ -19,6 +19,9 @@ out/
 *.sqlite
 *.sqlite3
 *.db
+# SQLite's write-ahead log, which the app creates beside every store it opens.
+*.db-shm
+*.db-wal
 .cache/
 .tts-cache/
 

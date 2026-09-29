@@ -7,9 +7,15 @@ type Context = { params: Promise<{ id: string }> };
 /**
  * Take a turn and stream the partner's reply.
  *
- * Body: `{ text: string | null }`. `null` asks for the partner's opening line;
- * a string is the learner's reply. One code path, so the opening and every turn
- * after it behave identically.
+ * Body: `{ text: string | null, responseMs: number | null }`. `null` text asks for
+ * the partner's opening line; a string is the learner's reply. `responseMs` is how
+ * long the learner took to write it, measured in the browser, and is stored on
+ * their turn. One code path, so the opening and every turn after it behave
+ * identically.
+ *
+ * A request can commit two turns: crossing a sprint boundary closes the scene and
+ * opens the next one, which the stream shows as two `done` frames with the
+ * debrief on the first. So the client cannot assume one exchange per request.
  *
  * The response is newline-delimited JSON, not SSE: there is no event id or
  * reconnect semantics to buy here, and one fewer parser on the client.
@@ -21,10 +27,12 @@ export async function POST(request: Request, { params }: Context) {
     return Response.json({ error: "This session does not exist." }, { status: 404 });
   }
   let learnerText: string | null;
+  let responseMs: number | null;
   try {
-    const body = (await request.json()) as { text?: unknown };
+    const body = (await request.json()) as { text?: unknown; responseMs?: unknown };
     const text = typeof body.text === "string" ? body.text.trim() : "";
     learnerText = body.text === null ? null : text;
+    responseMs = typeof body.responseMs === "number" ? body.responseMs : null;
   } catch {
     return Response.json({ error: "Expected a JSON body." }, { status: 400 });
   }
@@ -47,7 +55,7 @@ export async function POST(request: Request, { params }: Context) {
       };
 
       try {
-        await runTurn(id, learnerText, send, clientSignal);
+        await runTurn(id, { text: learnerText, responseMs }, send, clientSignal);
       } finally {
         releaseTurn(id);
         if (clientSignal.aborted) return;
