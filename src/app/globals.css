@@ -1,0 +1,73 @@
+/*
+ * Colour semantics, defined once. Four colours carry meaning across the whole
+ * interface: accent red for the learner's own turns and primary actions, blue
+ * for a New Word, amber for a Fumble, purple for the Grammar Point.
+ *
+ * Colour is never the only signal. Every marker also differs by underline style
+ * and by an explicit label, so the three stay apart in greyscale, in bright sun,
+ * and to a reader who does not separate red from green.
+ */
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #1b1f26;
+  --line: #262b34;
+  --ink: #e8eaee;
+  --ink-dim: #8f97a5;
+  --ink-faint: #5b6472;
+
+  --accent: #e0574a;
+  --accent-soft: #3a1f1c;
+
+  --new: #4a9eff;
+  --new-soft: #12263f;
+  --new-ink: #bcd9ff;
+
+  --fumble: #e0a03a;
+  --fumble-soft: #3a2c12;
+  --fumble-ink: #ffd899;
+
+  --grammar: #8f7ae0;
+  --grammar-soft: #241f3d;
+  --grammar-ink: #cfc2ff;
+
+  --jp: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo,
+    sans-serif;
+  --ui: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+textarea {
+  font-family: inherit;
+}
+
+.jp {
+  font-family: var(--jp);
+}
+
+a {
+  color: inherit;
+}
