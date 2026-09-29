@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE — 会話セッション UI / text only / throwaway</title>
+<!--
+  ====================================================================
+  PROTOTYPE — THROWAWAY. DO NOT BUILD ON THIS.
+  ====================================================================
+  Question: what should the live conversation screen look and feel like,
+  given a TEXT-ONLY chatbot format (no TTS, no dictation)?
+  Constraints from earlier turns:
+    - 30-min structured session, 4–6 sprints of 5–7 min each.
+    - 10 new vocab + 1 grammar point per session, woven in, not lectured.
+    - Fumble Deck re-surfaces words you failed to retrieve.
+    - Quiet corrections by default; drill-on-trigger.
+  Three structurally different variants, switchable via ?variant=A|B|C|D:
+    A  "The Messenger"  chat-bubble column, single screen, sticky input
+    B  "The Desk"       chat left + persistent coach rail right
+    C  "The Turn Feed"  discrete turn cards under a sprint timeline
+    D  "The Reader"     furigana-first reading surface, tap-to-reveal kanji
+  No real backend. Pure DOM/JS. The script is a hand-written 居酒屋
+  scenario used to drive all variants from the same engine.
+  ====================================================================
+-->
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14171c; --panel2:#1b1f26; --line:#262b34;
+    --ink:#e8eaee; --ink-dim:#8f97a5; --ink-faint:#5b6472;
+    --accent:#e0574a; --accent-soft:#3a1f1c;
+    --new:#4a9eff; --new-soft:#12263f;
+    --fum:#e0a03a; --fum-soft:#3a2c12;
+    --gram:#8f7ae0; --gram-soft:#241f3d;
+    --ok:#3fae72;
+    --r:14px;
+    --jp:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;
+    --ui:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+  .jp{font-family:var(--jp)}
+  button{font-family:inherit;color:inherit;cursor:pointer}
+  input,textarea{font-family:inherit}
+
+  .tok{position:relative;border-radius:5px;padding:1px 3px;cursor:pointer;transition:filter .12s}
+  .tok:hover{filter:brightness(1.18)}
+  .tok.new{background:var(--new-soft);color:#bcd9ff;box-shadow:inset 0 0 0 1px #1d3d63}
+  .tok.fum{background:var(--fum-soft);color:#ffd899;box-shadow:inset 0 0 0 1px #5c451a;text-decoration:underline wavy #e0a03a88}
+  .tok.gram{background:var(--gram-soft);color:#cfc2ff;box-shadow:inset 0 0 0 1px #3a3168}
+
+  .gloss{position:absolute;z-index:60;left:50%;transform:translateX(-50%);
+    top:calc(100% + 10px);width:min(320px,74vw);background:#05070a;
+    border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    box-shadow:0 18px 50px #000b;font-family:var(--ui)}
+  .gloss b{color:#fff;display:block;font-size:15px;margin-bottom:2px}
+  .gloss .rd{color:var(--ink-faint);font-size:12px;margin-bottom:8px;font-family:var(--jp)}
+  .gloss p{margin:0 0 8px;font-size:13px;line-height:1.55;color:var(--ink-dim)}
+  .gloss .eg{font-family:var(--jp);font-size:14px;color:#cfe0ff;background:#0f1620;
+    padding:7px 9px;border-radius:7px;margin:0}
+  .gloss .cl{position:absolute;top:-6px;left:50%;width:10px;height:10px;
+    background:#05070a;border-left:1px solid var(--line);border-top:1px solid var(--line);
+    transform:translateX(-50%) rotate(45deg)}
+  .gloss.fum-gloss b{color:#ffd899} .gloss.gram-gloss b{color:#cfc2ff}
+
+  #protoBadge{position:fixed;top:10px;left:10px;z-index:200;font:600 10px/1 var(--ui);
+    letter-spacing:.14em;color:#ffd0cb;background:#3a1f1ccc;border:1px solid #6b2f28;
+    padding:6px 9px;border-radius:6px;pointer-events:none}
+
+  /* ---------- floating variant switcher ---------- */
+  #switcher{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;
+    display:flex;align-items:center;gap:4px;background:#f2f4f8;border-radius:999px;
+    padding:5px;box-shadow:0 12px 40px #000c;font-family:var(--ui)}
+  #switcher button{border:0;background:transparent;width:34px;height:34px;border-radius:999px;
+    font-size:17px;color:#1a1d22;font-weight:700}
+  #switcher button:hover{background:#00000012}
+  #switcher .lbl{padding:0 14px;font:700 12.5px/1 var(--ui);color:#1a1d22;white-space:nowrap}
+  #switcher .lbl span{font-weight:400;color:#6a7180}
+
+  /* ---------- furigana ---------- */
+  ruby{ruby-position:over}
+  ruby rt{font-size:.44em;color:var(--ink-faint);font-weight:500;letter-spacing:.02em}
+  ruby.revealed-ruby rt{color:var(--new)}
+  .kanji-tap{border-bottom:1.5px dotted var(--ink-dim);cursor:pointer;border-radius:3px;
+    transition:background .15s,color .15s}
+  .kanji-tap:hover{background:var(--new-soft);color:#bcd9ff}
+
+  /* -------------------- Variant D: The Reader -------------------- */
+  body[data-variant="D"] #mount{display:grid;grid-template-rows:auto auto 1fr auto;height:100%;
+    max-width:720px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  .D-top{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:12px}
+  .D-top .ttl{font:700 12.5px/1 var(--ui)}
+  .D-top .grow{flex:1}
+  .Furi-toggle{display:flex;align-items:center;gap:7px;border:1px solid var(--line);
+    background:var(--panel2);border-radius:999px;padding:7px 13px 7px 11px;
+    font:600 11px/1 var(--ui);color:var(--ink-dim);transition:all .15s}
+  .Furi-toggle .led{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);transition:background .15s}
+  .Furi-toggle[data-on="1"]{border-color:#1d3d63;background:var(--new-soft);color:#bcd9ff}
+  .Furi-toggle[data-on="1"] .led{background:var(--new);box-shadow:0 0 8px var(--new)}
+  .D-legend{padding:9px 16px;border-bottom:1px solid var(--line);background:#0d1116;
+    display:flex;gap:16px;flex-wrap:wrap;font:500 10.5px/1 var(--ui);color:var(--ink-faint)}
+  .D-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;
+    vertical-align:-1px}
+  .D-feed{overflow-y:auto;padding:20px 18px;display:flex;flex-direction:column;gap:18px}
+  .D-turn{display:flex;flex-direction:column;gap:5px;max-width:93%}
+  .D-turn.p{align-self:flex-start}
+  .D-turn.y{align-self:flex-end;align-items:flex-end}
+  .D-turn .who{font:600 10px/1 var(--ui);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .D-turn.p .who{color:#9ec1ff} .D-turn.y .who{color:#ffd899}
+  .D-body{font:19px/2 var(--jp);padding:12px 16px;border-radius:13px;white-space:pre-wrap;
+    word-break:break-word;border:1px solid var(--line)}
+  .D-turn.p .D-body{background:var(--panel);border-top-left-radius:4px}
+  .D-turn.y .D-body{background:var(--accent-soft);border-color:#5e2e26;border-top-right-radius:4px}
+  .D-note{font:500 10.5px/1.4 var(--ui);color:var(--ink-faint);padding:0 4px;max-width:93%}
+  .D-note b{color:#bfe7cc;font-weight:600}
+  .D-input{padding:10px 14px 14px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;gap:8px;align-items:flex-end}
+  .D-input textarea{flex:1;resize:none;border-radius:10px;border:1px solid var(--line);
+    background:#0d1014;color:var(--ink);padding:11px 12px;font-size:16px;line-height:1.5;
+    font-family:var(--jp);min-height:46px;max-height:160px}
+  .D-input textarea:focus{outline:none;border-color:var(--accent)}
+  .D-input button{background:var(--accent);border:0;color:#fff;font-weight:700;
+    padding:0 18px;height:46px;border-radius:10px;font-size:14px}
+
+  /* -------------------- Variant A: The Messenger -------------------- */
+  body[data-variant="A"] #mount{
+    display:flex;flex-direction:column;height:100%;
+    max-width:760px;margin:0 auto;border-left:1px solid var(--line);
+    border-right:1px solid var(--line)
+  }
+  .A-strip{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid var(--line);
+    background:var(--panel);font:600 12px/1 var(--ui);color:var(--ink-dim)}
+  .A-strip .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .A-strip .grow{flex:1}
+  .A-strip .pill{font-family:var(--jp);font-weight:400;color:#cfe0ff}
+  .A-strip button{border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);
+    padding:6px 10px;border-radius:8px;font-size:11px}
+  .A-strip button:hover{color:var(--ink);border-color:#3a4250}
+
+  .A-feed{flex:1;overflow-y:auto;padding:18px 18px 8px;display:flex;flex-direction:column;gap:14px}
+  .A-msg{display:flex;flex-direction:column;max-width:78%;gap:4px}
+  .A-msg.p{align-self:flex-start}
+  .A-msg.y{align-self:flex-end;align-items:flex-end}
+  .A-msg .who{font:600 10.5px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);padding:0 4px}
+  .A-msg.p .who{color:#9ec1ff}
+  .A-msg.y .who{color:#ffd899}
+  .A-bubble{padding:11px 14px;border-radius:14px;font-size:17px;line-height:1.55;
+    font-family:var(--jp);white-space:pre-wrap;word-break:break-word}
+  .A-msg.p .A-bubble{background:var(--panel);border:1px solid var(--line);border-top-left-radius:5px}
+  .A-msg.y .A-bubble{background:var(--accent-soft);border:1px solid #5e2e26;
+    border-top-right-radius:5px}
+  .A-nudge{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .A-nudge .chip{font:500 11px/1 var(--ui);padding:5px 8px;border-radius:999px;
+    border:1px solid var(--line);background:#0f1318;color:var(--ink-dim)}
+  .A-nudge .chip.new-c{color:#bcd9ff;border-color:#1d3d63;background:var(--new-soft)}
+  .A-nudge .chip.gram-c{color:#cfc2ff;border-color:#3a3168;background:var(--gram-soft)}
+  .A-meta{font:500 10.5px/1 var(--ui);color:var(--ink-faint);padding:0 4px}
+
+  .A-input{padding:10px 12px 14px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;gap:8px;align-items:flex-end}
+  .A-input textarea{flex:1;resize:none;border-radius:10px;border:1px solid var(--line);
+    background:#0d1014;color:var(--ink);padding:11px 12px;font-size:16px;line-height:1.5;
+    font-family:var(--jp);min-height:46px;max-height:160px}
+  .A-input textarea:focus{outline:none;border-color:var(--accent)}
+  .A-input button.send{background:var(--accent);border:0;color:#fff;font-weight:700;
+    padding:0 18px;height:46px;border-radius:10px;font-size:14px;letter-spacing:.04em}
+  .A-input button.send:disabled{opacity:.4;cursor:not-allowed}
+  .A-hint{font:500 11px/1 var(--ui);color:var(--ink-faint);padding:0 14px 8px;background:var(--panel)}
+  .A-sprint-end{padding:14px 18px;background:var(--panel);border-top:1px solid var(--line)}
+  .A-sprint-end h4{margin:0 0 6px;font-size:14px;color:var(--ink)}
+  .A-sprint-end p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.5}
+
+  /* -------------------- Variant B: The Desk -------------------- */
+  body[data-variant="B"] #mount{display:grid;grid-template-columns:1fr 340px;height:100%}
+  .B-rail{border-left:1px solid var(--line);background:var(--panel);
+    padding:14px 14px 80px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
+  .B-chat{display:flex;flex-direction:column;height:100%;min-width:0}
+  .B-head{padding:13px 18px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px}
+  .B-head .ttl{font:700 13px/1 var(--ui);color:var(--ink)}
+  .B-head .sub{font:500 11.5px/1 var(--ui);color:var(--ink-dim);margin-top:2px}
+  .B-head .grow{flex:1}
+  .B-head button{border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);
+    padding:7px 11px;border-radius:8px;font-size:11px}
+
+  .B-feed{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+  .B-row{display:flex;gap:10px}
+  .B-row.y{flex-direction:row-reverse}
+  .B-avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;
+    background:var(--panel);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:14px}
+  .B-row.y .B-avatar{background:var(--accent-soft);border-color:#5e2e26;color:#ffd899}
+  .B-row.p .B-avatar{color:#9ec1ff}
+  .B-col{display:flex;flex-direction:column;max-width:min(560px,72%);gap:4px}
+  .B-col .name{font:600 10.5px/1 var(--ui);color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em}
+  .B-bubble{padding:10px 13px;border-radius:13px;font-size:16px;line-height:1.55;
+    font-family:var(--jp);white-space:pre-wrap;word-break:break-word;border:1px solid var(--line)}
+  .B-row.p .B-bubble{background:var(--panel);border-top-left-radius:4px}
+  .B-row.y .B-bubble{background:var(--accent-soft);border-color:#5e2e26;border-top-right-radius:4px}
+
+  .B-input{padding:10px 14px 14px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;gap:8px;align-items:flex-end}
+  .B-input textarea{flex:1;resize:none;border-radius:10px;border:1px solid var(--line);
+    background:#0d1014;color:var(--ink);padding:11px 12px;font-size:16px;line-height:1.5;
+    font-family:var(--jp);min-height:46px;max-height:160px}
+  .B-input textarea:focus{outline:none;border-color:var(--accent)}
+  .B-input button{background:var(--accent);border:0;color:#fff;font-weight:700;
+    padding:0 18px;height:46px;border-radius:10px;font-size:14px}
+
+  .R-card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .R-card h5{margin:0 0 9px;font:700 11px/1 var(--ui);letter-spacing:.12em;
+    text-transform:uppercase;color:var(--ink-faint)}
+  .R-words{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .R-slot{height:34px;border-radius:8px;border:1px dashed #303744;background:#10141b;
+    display:flex;align-items:center;justify-content:center;font:600 11.5px/1 var(--jp);
+    color:var(--ink-faint);position:relative}
+  .R-slot.filled{border-style:solid;border-color:var(--new);background:var(--new-soft);color:#cfe0ff}
+  .R-slot.fum{border-color:var(--fum);background:var(--fum-soft);color:#ffe2b8}
+  .R-slot .n{position:absolute;top:3px;right:5px;font:600 9px/1 var(--ui);color:var(--ink-faint)}
+  .R-gram-card{background:linear-gradient(160deg,var(--gram-soft),#1a1429);
+    border:1px solid #3a3168;border-radius:12px;padding:12px}
+  .R-gram-card h6{margin:0 0 5px;font:600 12px/1.3 var(--jp);color:#cfc2ff}
+  .R-gram-card .jp-ex{font-family:var(--jp);font-size:13px;color:#e2d8ff;background:#0d0a1a;
+    padding:7px 9px;border-radius:7px;margin:6px 0 0}
+  .R-gram-card .why{font:500 11px/1.45 var(--ui);color:var(--ink-dim);margin:7px 0 0}
+  .R-meter{display:flex;align-items:center;gap:10px;margin-top:6px}
+  .R-bar{flex:1;height:6px;border-radius:999px;background:#202632;overflow:hidden}
+  .R-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#ff8773);
+    transition:width .25s}
+  .R-meter b{font:700 12px/1 var(--ui);color:var(--ink);font-variant-numeric:tabular-nums}
+  .R-fumbles{display:flex;flex-direction:column;gap:8px}
+  .R-fumble{background:#0f1318;border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .R-fumble .youd{font:500 11px/1 var(--ui);color:var(--ink-faint);margin-bottom:3px}
+  .R-fumble .yous{font:500 13px/1.4 var(--jp);color:#ffd899;text-decoration:line-through #5c451a}
+  .R-fumble .nats{font:500 13px/1.4 var(--jp);color:#bfe7cc;margin-top:3px}
+  .R-fumble .gloss{font:500 11px/1.45 var(--ui);color:var(--ink-dim);margin-top:4px}
+
+  /* -------------------- Variant C: The Turn Feed -------------------- */
+  body[data-variant="C"] #mount{display:flex;flex-direction:column;height:100%;
+    max-width:760px;margin:0 auto;border-left:1px solid var(--line);
+    border-right:1px solid var(--line)}
+  .C-timeline{padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .C-pills{display:flex;gap:8px;margin-top:8px}
+  .C-pill{flex:1;height:36px;border-radius:10px;border:1px solid var(--line);background:#10141b;
+    display:flex;align-items:center;justify-content:center;font:700 11px/1 var(--ui);
+    color:var(--ink-faint);position:relative;overflow:hidden}
+  .C-pill .bar{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);width:0%}
+  .C-pill.done{background:#1a202c;color:var(--ink-dim);border-color:#2e3543}
+  .C-pill.now{background:var(--accent-soft);border-color:#6b2f28;color:#ffd0cb}
+  .C-pill.now .bar{width:60%}
+  .C-feed{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+  .C-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:13px 15px;position:relative}
+  .C-card.p{border-top:3px solid #1d3d63}
+  .C-card.y{border-top:3px solid #5e2e26}
+  .C-card .head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .C-card .head .who{font:700 11px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase}
+  .C-card.p .head .who{color:#9ec1ff}
+  .C-card.y .head .who{color:#ffd899}
+  .C-card .head .when{font:500 10.5px/1 var(--ui);color:var(--ink-faint)}
+  .C-card .head .grow{flex:1}
+  .C-card .body{font:17px/1.6 var(--jp);white-space:pre-wrap}
+  .C-card .corr{margin-top:8px;padding:8px 10px;background:#0f1318;border:1px dashed #2f3645;
+    border-radius:9px;font:500 12.5px/1.5 var(--jp)}
+  .C-card .corr .label{font:600 10px/1 var(--ui);letter-spacing:.1em;color:var(--ink-faint);
+    margin-bottom:3px;text-transform:uppercase}
+  .C-card .corr.fum-corr{color:#ffd899}
+  .C-card .corr.gram-corr{color:#cfc2ff}
+  .C-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .C-tag{font:500 11px/1 var(--jp);padding:4px 8px;border-radius:999px;border:1px solid var(--line)}
+  .C-tag.new-t{color:#bcd9ff;border-color:#1d3d63;background:var(--new-soft)}
+  .C-tag.gram-t{color:#cfc2ff;border-color:#3a3168;background:var(--gram-soft)}
+
+  .C-input{padding:10px 14px 14px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;gap:8px;align-items:flex-end}
+  .C-input textarea{flex:1;resize:none;border-radius:10px;border:1px solid var(--line);
+    background:#0d1014;color:var(--ink);padding:11px 12px;font-size:16px;line-height:1.5;
+    font-family:var(--jp);min-height:46px;max-height:160px}
+  .C-input textarea:focus{outline:none;border-color:var(--accent)}
+  .C-input button{background:var(--accent);border:0;color:#fff;font-weight:700;
+    padding:0 18px;height:46px;border-radius:10px;font-size:14px}
+
+  .C-sprint-end{margin:14px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:14px}
+  .C-sprint-end h4{margin:0 0 6px;font-size:14px}
+  .C-sprint-end p{margin:0;font-size:13px;color:var(--ink-dim);line-height:1.5}
+</style>
+</head>
+<body data-variant="A">
+<div id="protoBadge">PROTOTYPE · THROWAWAY</div>
+<div id="mount"></div>
+<div id="switcher">
+  <button id="prev" aria-label="previous variant">‹</button>
+  <div class="lbl"><span id="vKey">A</span> <span id="vName"></span></div>
+  <button id="next" aria-label="next variant">›</button>
+</div>
+
+<script>
+/* ====================================================================
+   DATA — sprint 1 of a session: 居酒屋, with a colleague.
+   markup: [kind:text|gloss]  kind = new | fum | gram
+   #END# marks sprint boundary.
+   ==================================================================== */
+const SCRIPT = [
+  {side:'p', who:'店員',
+    t:'いらっしゃいませ。カウンター[gram:でいいですか|提案・確認：「〜でいいですか？」を使うと、店員が複数の候補を出す代わりに、提案を受けて決める形になり、会話が短くなる。]？'},
+  {side:'y', who:'あなた',
+    t:'はい、お願いします。'},
+  {side:'p', who:'店員',
+    t:'[new:お飲み物|おのみもの｜飲み物。店で注文する時の丁寧な言い方。｜お飲み物は何になさいますか。]は何になさいますか。ビールと[new:酎ハイ|ちゅうハイ｜安い蒸留酒をソーダで割ったもの。居酒屋で定番。｜酎ハイを二つお願いします。]、どちらに[new:します|します｜「する」の丁寧形。注文・選択など、何かを「する」時の基本。｜こちらにします。]か。'},
+  {side:'y', who:'あなた',
+    t:'[new:酎ハイ|ちゅうハイ｜1杯なら「酎ハイを一本」。「一杯」の方が口語的。｜酎ハイを一杯お願いします。]で。……あ、すみません、これ[fum:名義|でんの｜billを誰のにつけるか。｜これ、誰の名義ですか？]？'},
+  {side:'p', who:'店員',
+    t:'あ、[fum:名義|でんの｜「誰の」を省略した結果、省略のつもりが不自然な短さになった。｜これ、誰の名義ですか？]ですね。じゃあ[fum:先輩|せんぱい｜同じ会社・学校の目上の同僚。｜田中さんの分も同じでいいですか？]の分も同じでいいですか。'},
+  {side:'y', who:'あなた',
+    t:'はい、お願いします。……これ、[fum:辛い|からい｜「からい」だけで食べたときの辛さ。料理の説明で使う。｜この料理、辛いですか。]？'},
+  {side:'p', who:'店員',
+    t:'少し[new:辛い|からい｜味覚としての「辛い」。｜このカレーは少し辛いです。]ですね。でも[new:大丈夫|だいじょうぶ｜「OK」「問題ない」の意味。日本語ではとても頻繁に使う。｜大丈夫です。]ですよ。辛かったら[new:調整|ちょうせい｜料理の味付けを調節すること。｜辛さを調整しましょうか。]しましょうか。'},
+  '#END#'
+];
+
+/* --------------------------------------------------------------------
+   FURIGANA DATA
+   In the real app this comes from a kanji reading dictionary keyed on
+   surface form. PROTOTYPE: a hand-written table for the words in the
+   script above. `hard` = the learner probably can't read this yet, so
+   it renders as a tap-to-reveal target instead of plain text.
+   -------------------------------------------------------------------- */
+const READINGS = {
+  'いらっしゃいませ':   {r:'いらっしゃいませ'},
+  'カウンター':        {r:'カウンター'},
+  'お飲み物':         {r:'おのみもの'},
+  '何':              {r:'なに',        hard:true},
+  'なさいます':        {r:'なさいます'},
+  'ビール':           {r:'ビール'},
+  '酎ハイ':          {r:'ちゅうハイ',   hard:true},
+  'どちら':          {r:'どちら'},
+  'します':           {r:'します'},
+  'お願い':           {r:'おねがい'},
+  'すみません':       {r:'すみません'},
+  '名義':            {r:'でんの',       hard:true},
+  '俺':              {r:'おれ',        hard:true},
+  '先輩':            {r:'せんぱい',     hard:true},
+  '分':              {r:'ぶん',        hard:true},
+  '同':              {r:'おな',        hard:true},
+  '少し':            {r:'すこし'},
+  '辛い':            {r:'からい',       hard:true},
+  '大丈夫':          {r:'だいじょうぶ',  hard:true},
+  '辛':              {r:'から',        hard:true},
+  '調整':            {r:'ちょうせい',    hard:true},
+};
+// longest-match-first so greedy longer words don't mis-segment
+const READING_KEYS = Object.keys(READINGS).filter(k => /[\u3040-\u30ff\u4e00-\u9fff]/.test(k))
+  .sort((a,b) => b.length - a.length);
+
+/* --------------------------------------------------------------------
+   Engine state + DOM helpers
+   -------------------------------------------------------------------- */
+const $ = (sel, root=document) => root.querySelector(sel);
+const el = (tag, attrs={}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'style') Object.assign(n.style, v);
+    else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) n.setAttribute(k, v);
+  }
+  for (const k of kids) {
+    if (k == null) continue;
+    n.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
+  }
+  return n;
+};
+
+const TOK = /\[(new|fum|gram):([^\|]+)\|([^\]]+)\]/g;
+function renderText(t, onGloss) {
+  const frag = document.createDocumentFragment();
+  let last = 0, m;
+  TOK.lastIndex = 0;
+  while ((m = TOK.exec(t))) {
+    if (m.index > last) frag.appendChild(document.createTextNode(t.slice(last, m.index)));
+    const [, kind, txt, gloss] = m;
+    const span = el('span', {class: 'tok ' + kind, tabindex: '0'}, txt);
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onGloss && onGloss({kind, txt, gloss, anchor: e.currentTarget});
+    });
+    frag.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  if (last < t.length) frag.appendChild(document.createTextNode(t.slice(last)));
+  return frag;
+}
+
+let openGloss = null;
+function dismissGloss() {
+  if (openGloss) { openGloss.remove(); openGloss = null; }
+  document.removeEventListener('click', dismissGloss);
+}
+function showGloss({kind, txt, gloss, anchor}) {
+  dismissGloss();
+  const [head, ...rest] = gloss.split('｜');
+  const [reading, body, example] = rest.join('｜').split('｜');
+  const g = el('div', {class: 'gloss ' + (kind === 'fum' ? 'fum-gloss' : kind === 'gram' ? 'gram-gloss' : '')},
+    el('div', {class: 'cl'}),
+    el('b', {}, txt),
+    kind !== 'gram' && reading ? el('div', {class: 'rd'}, reading) : null,
+    el('p', {}, body || ''),
+    example ? el('div', {class: 'eg'}, example) : null
+  );
+  document.body.appendChild(g);
+  const r = anchor.getBoundingClientRect();
+  g.style.left = (r.left + r.width/2) + 'px';
+  g.style.top  = (r.bottom + 10) + 'px';
+  g.style.transform = 'translateX(-50%)';
+  g.style.position = 'fixed';
+  // clamp to viewport
+  requestAnimationFrame(() => {
+    const gr = g.getBoundingClientRect();
+    if (gr.right > innerWidth - 8) g.style.left = (innerWidth - 8 - gr.width/2) + 'px';
+    if (gr.left < 8) g.style.left = (8 + gr.width/2) + 'px';
+    if (gr.bottom > innerHeight - 8) g.style.top = (innerHeight - 8 - gr.height) + 'px';
+  });
+  openGloss = g;
+  setTimeout(() => document.addEventListener('click', dismissGloss), 0);
+}
+
+/* --------------------------------------------------------------------
+   FURIGANA RENDERER
+   Splits a plain Japanese string into segments and renders each with
+   the current furigana mode:
+
+     on  -> <ruby>base<rt>reading</rt></ruby> for every known word
+     off -> plain text for known/easy words, and a dashed tap-to-reveal
+            target for words marked hard:true, so a kanji you can't read
+            never renders as an invisible gap.
+   -------------------------------------------------------------------- */
+function segmentForFurigana(str) {
+  const hasKanji = (s) => /[一-鿿]/.test(s);
+  const out = [];
+  let i = 0;
+  outer: while (i < str.length) {
+    for (const key of READING_KEYS) {
+      if (str.startsWith(key, i)) {
+        // only treat it as a ruby segment if it actually contains kanji;
+        // words already written in kana need no reading.
+        if (hasKanji(key)) {
+          out.push({text: key, reading: READINGS[key].r, hard: !!READINGS[key].hard});
+        } else {
+          out.push({text: key, plain: true});
+        }
+        i += key.length;
+        continue outer;
+      }
+    }
+    // accumulate a run of characters with no reading entry
+    let j = i;
+    while (j < str.length) {
+      let matched = false;
+      for (const key of READING_KEYS) {
+        if (str.startsWith(key, j)) { matched = true; break; }
+      }
+      if (matched) break;
+      j++;
+    }
+    out.push({text: str.slice(i, j), plain: true});
+    i = j;
+  }
+  return out;
+}
+
+function renderFuriganaInto(frag, str) {
+  for (const seg of segmentForFurigana(str)) {
+    if (seg.plain) {
+      frag.appendChild(document.createTextNode(seg.text));
+      continue;
+    }
+    if (Session.furigana === 'on') {
+      const ruby = document.createElement('ruby');
+      ruby.appendChild(document.createTextNode(seg.text));
+      const rt = document.createElement('rt');
+      rt.textContent = seg.reading;
+      ruby.appendChild(rt);
+      frag.appendChild(ruby);
+      continue;
+    }
+    // furigana off
+    if (!seg.hard) {
+      frag.appendChild(document.createTextNode(seg.text));
+      continue;
+    }
+    // hard word, furigana off -> tap to reveal
+    const key = seg.text;
+    if (Session.revealed.has(key)) {
+      const ruby = document.createElement('ruby');
+      ruby.className = 'revealed-ruby';
+      ruby.appendChild(document.createTextNode(seg.text));
+      const rt = document.createElement('rt');
+      rt.textContent = seg.reading;
+      ruby.appendChild(rt);
+      frag.appendChild(ruby);
+      continue;
+    }
+    const span = document.createElement('span');
+    span.className = 'kanji-tap';
+    span.textContent = seg.text;
+    span.title = 'タップで読み方';
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      Session.revealed.add(key);
+      render();
+    });
+    frag.appendChild(span);
+  }
+}
+
+/* Builds the inner content of a message body: markup tokens AND furigana. */
+function renderBody(t, onGloss) {
+  const frag = document.createDocumentFragment();
+  let last = 0, m;
+  TOK.lastIndex = 0;
+  while ((m = TOK.exec(t))) {
+    if (m.index > last) renderFuriganaInto(frag, t.slice(last, m.index));
+    const [, kind, txt, gloss] = m;
+    const span = el('span', {class: 'tok ' + kind, tabindex: '0'}, txt);
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onGloss && onGloss({kind, txt, gloss, anchor: e.currentTarget});
+    });
+    frag.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  if (last < t.length) renderFuriganaInto(frag, t.slice(last));
+  return frag;
+}
+
+/* --------------------------------------------------------------------
+   Session state
+   -------------------------------------------------------------------- */
+const Session = {
+  turnIdx: 0,
+  userTurns: [],   // raw typed strings
+  newWords: [],    // {word, when}
+  fumbles: [],     // {you, natural, gloss}
+  grammarSeen: 0,
+  sprint: 1,
+  sprintTotal: 5,
+  furigana: 'off',      // 'off' | 'on'  — off is the default on purpose
+  revealed: new Set(),  // per-word manual reveals while furigana is off
+  startedAt: Date.now(),
+};
+
+function reset() {
+  Session.turnIdx = 0;
+  Session.userTurns = [];
+  Session.newWords = [];
+  Session.fumbles = [];
+  Session.grammarSeen = 0;
+  Session.sprint = 1;
+  Session.startedAt = Date.now();
+  render();
+}
+function advancePastPartners() {
+  while (currentTurn() && currentTurn() !== '#END#' && currentTurn().side === 'p') {
+    Session.turnIdx++;
+  }
+}
+function currentTurn() { return SCRIPT[Session.turnIdx]; }
+function isDone() { return currentTurn() === '#END#'; }
+function isFumbleTurn() {
+  const t = currentTurn();
+  return t && t.side === 'y' && /\bfum:/.test(t.t);
+}
+function fumbleData() {
+  const t = currentTurn();
+  const m = t.t.match(/\[fum:([^\|]+)\|([^\]]+)\]/);
+  return m ? {said: m[1], full: m[2]} : null;
+}
+function commitTurn(raw) {
+  Session.userTurns.push(raw);
+  const t = currentTurn();
+  if (t && t.side === 'y') {
+    // harvest new words / grammar from this user turn if present
+    let mm;
+    const reTok = /\[(new|gram):([^\|]+)\|([^\]]+)\]/g;
+    while ((mm = reTok.exec(t.t))) {
+      if (mm[1] === 'new' && !Session.newWords.some(w => w.word === mm[2])) {
+        Session.newWords.push({word: mm[2], when: Date.now()});
+      }
+      if (mm[1] === 'gram') Session.grammarSeen++;
+    }
+    // harvest fumble for the deck
+    const f = fumbleData();
+    if (f) {
+      const full = f.full.split('｜');
+      Session.fumbles.unshift({
+        you: f.said,
+        natural: full[full.length-1],
+        gloss: full.length > 2 ? full.slice(0,-1).join('｜') : ''
+      });
+    }
+    Session.turnIdx++;
+  }
+  render();
+}
+
+function sendHandler(text) {
+  if (!currentTurn() || isDone()) return;
+  if (currentTurn().side !== 'y') return;
+  const v = (text || '').trim();
+  if (!v) return;
+  commitTurn(v);
+}
+
+function makeInputDocked(onSend, hint) {
+  const wrap = el('div', {class: 'A-input'},
+    el('textarea', {placeholder: '日本語で返信…  (Enter: 送信 / Shift+Enter: 改行)',
+                    onkeydown: (e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(e.currentTarget.value); e.currentTarget.value = ''; }
+                    }}),
+    el('button', {class: 'send', onclick: (e) => {
+      const ta = e.currentTarget.parentElement.querySelector('textarea');
+      const v = ta.value;
+      ta.value = '';
+      onSend(v);
+    }}, '送信')
+  );
+  return wrap;
+}
+
+/* --------------------------------------------------------------------
+   Variant renderers
+   -------------------------------------------------------------------- */
+function renderA() {
+  const mount = $('#mount'); mount.innerHTML = '';
+  const strip = el('div', {class: 'A-strip'},
+    el('div', {class: 'dot'}),
+    el('div', {}, '居酒屋 · スプリント ' + Session.sprint + '/' + Session.sprintTotal),
+    el('div', {class: 'pill'}, '新しい単語 ' + Session.newWords.length + '/10'),
+    el('div', {class: 'grow'}),
+    el('button', {onclick: reset}, 'リセット')
+  );
+  const feed = el('div', {class: 'A-feed'});
+  // render all completed turns
+  for (let i = 0; i < Session.turnIdx; i++) {
+    const turn = SCRIPT[i];
+    if (turn === '#END#' || !turn) continue;
+    feed.appendChild(renderAMsg(turn, i));
+  }
+  // pending turn
+  if (currentTurn() && !isDone()) {
+    feed.appendChild(renderAPending());
+  } else if (isDone()) {
+    feed.appendChild(renderADebrief());
+  }
+  const input = makeInputDocked(sendHandler);
+  mount.appendChild(strip);
+  mount.appendChild(feed);
+  mount.appendChild(input);
+  mount.appendChild(el('div', {class: 'A-hint'}, '↑ 新しい単語と文法はマーカー色。下線波線は言い間違い — タップで解説。'));
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderAMsg(turn, idx) {
+  const isP = turn.side === 'p';
+  const msg = el('div', {class: 'A-msg ' + (isP ? 'p' : 'y')},
+    el('div', {class: 'who'}, isP ? '相手' : 'あなた'),
+    el('div', {class: 'A-bubble jp'}, renderText(turn.t, showGloss))
+  );
+  // first time we encounter a new word, surface a small chip
+  if (isP) {
+    const tags = [];
+    let m;
+    const re = /\[(new|gram):([^\|]+)\|/g;
+    while ((m = re.exec(turn.t))) tags.push({kind:m[1], txt:m[2]});
+    if (tags.length) {
+      const row = el('div', {class: 'A-nudge'},
+        ...tags.map(t => el('span', {class: 'chip ' + (t.kind === 'new' ? 'new-c' : 'gram-c')}, (t.kind === 'new' ? '+ ' : '文 ') + t.txt))
+      );
+      msg.appendChild(row);
+    }
+  }
+  // user-turn correction line if fumble
+  if (!isP && isFumbleTurnStatic(idx)) {
+    const f = fumbleDataAt(idx);
+    if (f) {
+      msg.appendChild(el('div', {class: 'A-meta'}, '↓ 自然: ' + f.full.split('｜').slice(-1)[0]));
+    }
+  }
+  return msg;
+}
+
+function renderAPending() {
+  const turn = currentTurn();
+  const isP = turn.side === 'p';
+  const wrap = el('div', {class: 'A-msg ' + (isP ? 'p' : 'y') + ' pending'});
+  if (isP) {
+    wrap.appendChild(el('div', {class: 'who'}, '相手 · 入力中…'));
+    wrap.appendChild(el('div', {class: 'A-bubble jp', style: {color: 'var(--ink-faint)'}}, '入力中…'));
+  } else {
+    wrap.appendChild(el('div', {class: 'A-msg y placeholder',
+      style: {alignSelf:'flex-end',padding:'2px 6px',font:'600 10.5px/1 var(--ui)',
+              letterSpacing:'.12em',textTransform:'uppercase',color:'var(--ink-faint)'}}, 'あなたの番'));
+  }
+  return wrap;
+}
+
+function renderADebrief() {
+  return el('div', {class: 'A-sprint-end'},
+    el('h4', {}, 'スプリント ' + Session.sprint + ' 終わり'),
+    el('p', {}, Session.newWords.length + ' 個の新しい単語、' + Session.fumbles.length + ' 個の言い直し。次のスプリントで復習します。')
+  );
+}
+
+// helpers for looking at static turns in the script
+function isFumbleTurnStatic(idx) {
+  const t = SCRIPT[idx];
+  return t && t.side === 'y' && /\bfum:/.test(t.t);
+}
+function fumbleDataAt(idx) {
+  const t = SCRIPT[idx];
+  const m = t.t.match(/\[fum:([^\|]+)\|([^\]]+)\]/);
+  return m ? {said: m[1], full: m[2]} : null;
+}
+
+/* -------------------- Variant B -------------------- */
+function renderB() {
+  const mount = $('#mount'); mount.innerHTML = '';
+  const chat = el('div', {class: 'B-chat'});
+  chat.appendChild(el('div', {class: 'B-head'},
+    el('div', {},
+      el('div', {class: 'ttl'}, '居酒屋 · スプリント ' + Session.sprint),
+      el('div', {class: 'sub'}, '新しい単語 ' + Session.newWords.length + '/10  ·  文法 ' + Session.grammarSeen + ' 回出現')
+    ),
+    el('div', {class: 'grow'}),
+    el('button', {onclick: reset}, 'リセット')
+  ));
+  const feed = el('div', {class: 'B-feed'});
+  for (let i = 0; i < Session.turnIdx; i++) {
+    feed.appendChild(renderBRow(SCRIPT[i], i));
+  }
+  if (isDone()) feed.appendChild(renderBDebrief());
+  chat.appendChild(feed);
+  chat.appendChild(makeInputDocked(sendHandler));
+
+  const rail = el('div', {class: 'B-rail'});
+  rail.appendChild(renderRWordBudget());
+  rail.appendChild(renderRGrammar());
+  rail.appendChild(renderRSprint());
+  rail.appendChild(renderRFumbles());
+
+  mount.appendChild(chat);
+  mount.appendChild(rail);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderBRow(turn, idx) {
+  if (!turn || turn === '#END#') return el('div');
+  const isP = turn.side === 'p';
+  const bubble = el('div', {class: 'B-bubble jp'}, renderText(turn.t, showGloss));
+  if (!isP && isFumbleTurnStatic(idx)) {
+    const f = fumbleDataAt(idx);
+    if (f) {
+      const nat = f.full.split('｜').slice(-1)[0];
+      bubble.appendChild(el('div', {style: {marginTop:'8px',font:'500 12px/1.5 var(--ui)',color:'var(--ink-faint)'}},
+        '自然な言い方: ', el('span', {class: 'jp', style: {color:'#bfe7cc'}}, nat)));
+    }
+  }
+  return el('div', {class: 'B-row ' + (isP ? 'p' : 'y')},
+    el('div', {class: 'B-avatar jp'}, turn.who ? turn.who.charAt(0) : (isP ? '相' : 'あ')),
+    el('div', {class: 'B-col'},
+      el('div', {class: 'name'}, turn.who || (isP ? '相手' : 'あなた')),
+      bubble
+    )
+  );
+}
+
+function renderBDebrief() {
+  return el('div', {style: {background:'var(--panel)',border:'1px solid var(--line)',borderRadius:'12px',padding:'12px 14px',margin:'12px 0'}},
+    el('div', {style: {font:'700 13px/1.2 var(--ui)',marginBottom:'5px'}}, 'スプリント ' + Session.sprint + ' 終わり'),
+    el('div', {style: {font:'500 12.5px/1.5 var(--ui)',color:'var(--ink-dim)'}},
+      Session.newWords.length + ' 個の新しい単語、' + Session.fumbles.length + ' 個の言い直し。次のスプリントで復習します。')
+  );
+}
+
+function renderRWordBudget() {
+  const slots = [];
+  for (let i = 0; i < 10; i++) {
+    const w = Session.newWords[i];
+    slots.push(el('div', {class: 'R-slot ' + (w ? 'filled' : '')},
+      el('span', {class: 'n'}, '#' + (i+1)),
+      w ? w.word : ''
+    ));
+  }
+  return el('div', {class: 'R-card'},
+    el('h5', {}, '新しい単語 ' + Session.newWords.length + ' / 10'),
+    el('div', {class: 'R-words'}, ...slots)
+  );
+}
+function renderRGrammar() {
+  return el('div', {class: 'R-gram-card'},
+    el('h5', {style: {margin:0,color:'#cfc2ff',letterSpacing:'.12em',textTransform:'uppercase',
+                    font:'700 11px/1 var(--ui)'}}, '今日の文法'),
+    el('h6', {}, '〜でいいですか？'),
+    el('div', {class: 'jp-ex'}, 'カウンターでいいですか？'),
+    el('p', {class: 'why'}, '提案・確認の形。候補を並べて選ばせるより短く済む。今日の会話で 4 回使われています。')
+  );
+}
+function renderRSprint() {
+  const pct = Math.min(100, Math.round((Session.turnIdx / SCRIPT.filter(x => x !== '#END#').length) * 100));
+  return el('div', {class: 'R-card'},
+    el('h5', {}, 'スプリント ' + Session.sprint + ' / ' + Session.sprintTotal),
+    el('div', {class: 'R-meter'},
+      el('b', {}, pct + '%'),
+      el('div', {class: 'R-bar'}, el('i', {style: {width: pct + '%'}}))
+    ),
+    el('div', {style: {marginTop:'8px',font:'500 11px/1.45 var(--ui)',color:'var(--ink-faint)'}},
+      '今日の文法・単語はここで全部見えます')
+  );
+}
+function renderRFumbles() {
+  const card = el('div', {class: 'R-card'},
+    el('h5', {}, '言い直し (' + Session.fumbles.length + ')')
+  );
+  if (!Session.fumbles.length) {
+    card.appendChild(el('div', {style: {font:'500 12px/1.5 var(--ui)',color:'var(--ink-faint)'}}, 'まだありません。'));
+    return card;
+  }
+  const list = el('div', {class: 'R-fumbles'});
+  for (const f of Session.fumbles.slice(0, 3)) {
+    list.appendChild(el('div', {class: 'R-fumble'},
+      el('div', {class: 'youd'}, 'あなた'),
+      el('div', {class: 'yous'}, f.you),
+      el('div', {class: 'nats'}, f.natural),
+      f.gloss ? el('div', {class: 'gloss'}, f.gloss) : null
+    ));
+  }
+  card.appendChild(list);
+  return card;
+}
+
+/* -------------------- Variant C -------------------- */
+function renderC() {
+  const mount = $('#mount'); mount.innerHTML = '';
+  // sprint timeline
+  const pills = el('div', {class: 'C-pills'});
+  for (let i = 1; i <= Session.sprintTotal; i++) {
+    const cls = i < Session.sprint ? 'done' : i === Session.sprint ? 'now' : '';
+    const p = el('div', {class: 'C-pill ' + cls},
+      i === Session.sprint ? 'スプリント ' + i : (i < Session.sprint ? '✓ ' + i : 'スプリント ' + i),
+      el('div', {class: 'bar'})
+    );
+    pills.appendChild(p);
+  }
+  const tl = el('div', {class: 'C-timeline'},
+    el('div', {style: {display:'flex',justifyContent:'space-between',alignItems:'center',font:'700 12px/1 var(--ui)'}},
+      el('span', {}, '居酒屋 · スプリント ' + Session.sprint + ' / ' + Session.sprintTotal),
+      el('button', {onclick: reset, style:{border:'1px solid var(--line)',background:'var(--panel2)',
+        color:'var(--ink-dim)',padding:'6px 10px',borderRadius:'8px',fontSize:'11px'}}, 'リセット')
+    ),
+    pills,
+    el('div', {style: {marginTop:'10px',font:'500 11px/1.4 var(--ui)',color:'var(--ink-faint)'}},
+      '新しい単語 ' + Session.newWords.length + ' / 10  ·  文法 ' + Session.grammarSeen + ' 回')
+  );
+  const feed = el('div', {class: 'C-feed'});
+  for (let i = 0; i < Session.turnIdx; i++) {
+    const t = SCRIPT[i];
+    if (!t || t === '#END#') continue;
+    feed.appendChild(renderCCard(t, i));
+  }
+  if (isDone()) feed.appendChild(renderCDebrief());
+  mount.appendChild(tl);
+  mount.appendChild(feed);
+  mount.appendChild(makeInputDocked(sendHandler));
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderCCard(turn, idx) {
+  const isP = turn.side === 'p';
+  const body = el('div', {class: 'body jp'}, renderText(turn.t, showGloss));
+  const card = el('div', {class: 'C-card ' + (isP ? 'p' : 'y')},
+    el('div', {class: 'head'},
+      el('div', {class: 'who'}, turn.who || (isP ? '相手' : 'あなた')),
+      el('div', {class: 'grow'}),
+      el('div', {class: 'when'}, '#' + (idx + 1))
+    ),
+    body
+  );
+  if (!isP && isFumbleTurnStatic(idx)) {
+    const f = fumbleDataAt(idx);
+    if (f) {
+      const parts = f.full.split('｜');
+      const nat = parts[parts.length - 1];
+      const gloss = parts.length > 2 ? parts.slice(0,-1).join('｜') : '';
+      card.appendChild(el('div', {class: 'corr fum-corr'},
+        el('div', {class: 'label'}, '自然な言い方'),
+        nat,
+        gloss ? el('div', {style: {marginTop:'4px',font:'500 11px/1.45 var(--ui)',color:'var(--ink-faint)'}}, gloss) : null
+      ));
+    }
+  }
+  // tags row
+  const tags = [];
+  let m;
+  const re = /\[(new|gram):([^\|]+)\|/g;
+  while ((m = re.exec(turn.t))) tags.push({kind:m[1], txt:m[2]});
+  if (tags.length) {
+    card.appendChild(el('div', {class: 'C-tags'},
+      ...tags.map(t => el('span', {class: 'C-tag ' + (t.kind === 'new' ? 'new-t' : 'gram-t')},
+        (t.kind === 'new' ? '+ new · ' : '文 · ') + t.txt))
+    ));
+  }
+  return card;
+}
+
+function renderCDebrief() {
+  return el('div', {class: 'C-sprint-end'},
+    el('h4', {}, 'スプリント ' + Session.sprint + ' 終わり'),
+    el('p', {}, Session.newWords.length + ' 個の新しい単語、' + Session.fumbles.length + ' 個の言い直し。次のスプリントで復習します。')
+  );
+}
+
+/* --------------------------------------------------------------------
+   Variant D: The Reader — furigana-first reading surface
+   -------------------------------------------------------------------- */
+function renderD() {
+  const mount = $('#mount'); mount.innerHTML = '';
+
+  const furiOn = Session.furigana === 'on';
+  const toggle = el('button', {class: 'Furi-toggle', 'data-on': furiOn ? '1' : '0',
+    onclick: () => { Session.furigana = furiOn ? 'off' : 'on'; render(); }},
+    el('span', {class: 'led'}),
+    furiOn ? 'ふりがな: ON' : 'ふりがな: OFF'
+  );
+
+  mount.appendChild(el('div', {class: 'D-top'},
+    el('div', {class: 'ttl'}, '居酒屋 · スプリント ' + Session.sprint + '/' + Session.sprintTotal),
+    el('div', {class: 'grow'}),
+    el('button', {onclick: () => { Session.revealed.clear(); reset(); },
+      style:{border:'1px solid var(--line)',background:'var(--panel2)',color:'var(--ink-dim)',
+             padding:'7px 11px',borderRadius:'8px',fontSize:'11px',fontWeight:'600'}}, 'リセット'),
+    toggle
+  ));
+
+  mount.appendChild(el('div', {class: 'D-legend'},
+    el('span', {}, el('i', {style:{background:'#bcd9ff'}}), '新しい語'),
+    el('span', {}, el('i', {style:{background:'#ffd899'}}), '言い間違い'),
+    el('span', {}, el('i', {style:{background:'#cfc2ff'}}), '今日の文法'),
+    el('span', {}, el('i', {style:{background:'var(--ink-faint)'}}), '点線下の漢字 = タップで読み方')
+  ));
+
+  const feed = el('div', {class: 'D-feed'});
+  for (let i = 0; i < Session.turnIdx; i++) {
+    const t = SCRIPT[i];
+    if (!t || t === '#END#') continue;
+    const isP = t.side === 'p';
+    const turn = el('div', {class: 'D-turn ' + (isP ? 'p' : 'y')},
+      el('div', {class: 'who'}, t.who || (isP ? '相手' : 'あなた')),
+      el('div', {class: 'D-body'}, renderBody(t.t, showGloss))
+    );
+    feed.appendChild(turn);
+    if (!isP && isFumbleTurnStatic(i)) {
+      const f = fumbleDataAt(i);
+      if (f) {
+        const parts = f.full.split('｜');
+        const nat = parts[parts.length - 1];
+        feed.appendChild(el('div', {class: 'D-note', style:{alignSelf:'flex-end'}},
+          '自然な言い方: ', el('b', {class:'jp'}, nat)));
+      }
+    }
+  }
+  if (isDone()) {
+    feed.appendChild(el('div', {class: 'D-turn p'},
+      el('div', {class: 'D-body'}, 'スプリント ' + Session.sprint + ' 終わり。')));
+  }
+  mount.appendChild(feed);
+
+  const ta = el('textarea', {placeholder:'日本語で返信…',
+    onkeydown: (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); sendHandler(e.currentTarget.value); e.currentTarget.value = '';
+      }
+    }});
+  mount.appendChild(el('div', {class: 'D-input'}, ta,
+    el('button', {onclick: () => { sendHandler(ta.value); ta.value = ''; }}, '送信')));
+  feed.scrollTop = feed.scrollHeight;
+}
+
+/* --------------------------------------------------------------------
+   Switcher
+   -------------------------------------------------------------------- */
+const VARIANTS = [
+  {key:'A', name:'The Messenger', render: renderA},
+  {key:'B', name:'The Desk',      render: renderB},
+  {key:'C', name:'The Turn Feed', render: renderC},
+  {key:'D', name:'The Reader',    render: renderD},
+];
+function getVariantKey() {
+  const k = new URLSearchParams(location.search).get('variant');
+  return ['A','B','C','D'].includes(k) ? k : 'A';
+}
+function cycle(delta) {
+  const keys = VARIANTS.map(v => v.key);
+  const i = keys.indexOf(getVariantKey());
+  setVariantKey(keys[(i + delta + keys.length) % keys.length]);
+}
+function setVariantKey(k) {
+  history.replaceState({}, '', '?variant=' + k);
+  document.body.setAttribute('data-variant', k);
+  $('#vKey').textContent = k;
+  $('#vName').textContent = '(' + VARIANTS.find(v => v.key === k).name + ')';
+  render();
+}
+function render() {
+  dismissGloss();
+  advancePastPartners();
+  const v = VARIANTS.find(x => x.key === getVariantKey());
+  v.render();
+}
+
+$('#prev').addEventListener('click', () => cycle(-1));
+$('#next').addEventListener('click', () => cycle(+1));
+document.addEventListener('keydown', (e) => {
+  const ae = document.activeElement;
+  if (ae && /input|textarea|select/i.test(ae.tagName)) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(+1);
+});
+
+setVariantKey(getVariantKey());
+</script>
+</body>
+</html>
