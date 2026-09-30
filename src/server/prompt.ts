@@ -2,15 +2,6 @@ import type { GrammarPoint, SprintBrief, WordSeed } from "@/lib/types";
 import type { Stance } from "./stance";
 
 /**
- * The deck words currently on the Fumble Deck, as their natural forms.
- *
- * Each entry is a Japanese phrase the learner has fumbled before. The deck view
- * is the source — we read it fresh each turn so a word that just got cleared
- * stops being targeted on the next turn.
- */
-export type DeckWord = string;
-
-/**
  * The system prompt is assembled per turn and is a first-class artifact.
  *
  * Five forces pull against each other in here. The partner has to sound like a
@@ -75,12 +66,20 @@ function stanceLine(stance: Stance, word: WordSeed): string {
   }
 }
 
-/** How many new words this turn may introduce. */
+/** How many markers this turn may introduce, and which kinds are required. */
 function markerHint(moment: Moment, stance: Stance, hasDeck: boolean): string {
   if (moment === "closing") return "今回は0個。";
+  // The opening is the only moment where the brief itself does not yet require
+  // anything of the learner, so it is also the only moment we can use to
+  // shape what the scene will demand. With deck words on the deck, the scene
+  // has to be one where the learner has to produce at least one of them —
+  // otherwise the conversation does not advance, and the deck never shrinks.
+  // Mandating a `deck` marker in the opening line is how we make that
+  // requirement visible to the partner: a marker on the partner's own text
+  // is what proves the deck word is in play.
   if (moment === "opening") {
     return hasDeck
-      ? "今回は new を1つ、deck を1つまで。相手の語を本文に入れるなら deck のマーカーで囲む。"
+      ? "今回は new を1つ、deck を1つ以上。本文のなかに必ず deck の語を入れ、その語に deck のマーカーで囲む。"
       : "今回は new を1つ。";
   }
   if (stance === "give-word") return "今回は new を1つ。今、渡した語。";
@@ -90,7 +89,7 @@ function markerHint(moment: Moment, stance: Stance, hasDeck: boolean): string {
 }
 
 /** Whether the deck-word engineering instruction needs to appear this turn. */
-function deckBlock(deckWords: DeckWord[]): string {
+function deckBlock(deckWords: string[]): string {
   if (deckWords.length === 0) return "";
   const lines = deckWords.map((w) => `- ${w}`).join("\n");
   return `
@@ -148,7 +147,7 @@ export interface PromptContext {
    * that requires at least one of these — the distinction between "mention" and
    * "require" is what makes the deck worth anything.
    */
-  deckWords: DeckWord[];
+  deckWords: string[];
   /**
    * The one grammar pattern this session teaches. Null on a session recorded
    * before the grammar-point slice existed; a fresh session always carries

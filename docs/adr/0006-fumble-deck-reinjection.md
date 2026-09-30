@@ -85,23 +85,45 @@ classifying the learner's turn, not a separate step.
 ### Self-clearing
 
 `produced` is read into `ParsedReply.produced: string[]` (after deduplication)
-and acted on right after the turn commits:
+and passed into `commitExchange` / `commitBoundary` as a `clearDeck` parameter:
 
 ```ts
-if (parsed.produced.length > 0) clearDeckNaturals(parsed.produced);
+commitExchange(sessionId, learner, partner, sprint, capture, parsed.produced);
 ```
 
-`clearDeckNaturals(naturals)` issues one `UPDATE fumble SET cleared_at = ?
-WHERE natural = ? AND cleared_at IS NULL` per natural. The transaction is
-`db.transaction` so either the turn and the clearance commit together, or
-neither does. A learner who produces two deck words in one turn is one
-`commitExchange` write and two clearance updates; a learner who produces none
-is no clearance at all.
+The clearance runs inside the same `db.transaction` wrapper that the turn write
+runs in. `clearDeckNaturals(naturals)` issues one
+`UPDATE fumble SET cleared_at = ? WHERE natural = ? AND cleared_at IS NULL` per
+natural; it does not open its own transaction, and the call site is the only
+place it runs. Either the learner turn and the clearance commit together, or
+neither does — there is no window where the turn is on disk and the deck has
+not shrunk. A SIGKILL between the two writes is not possible, because there
+are no two writes.
+
+A learner who produces two deck words in one turn is one `commitExchange` and
+two clearance updates inside the same transaction; a learner who produces none
+is no clearance at all. The `cleared_at IS NULL` guard makes the function
+idempotent: re-running it on a deck that has already cleared this natural is
+a no-op, and the timestamp of the first success is the one the history records.
 
 The deck the next turn reads is the cleared version, so a word the learner
 just produced is no longer being engineered into the partner's reply on the
 turn that follows. The deck shrink is immediate — not at the end of the session,
 not at the debrief, but at the same commit that wrote the learner's turn.
+
+### Mandating the opening
+
+The opening of a scene is the only moment where the brief itself does not yet
+require anything of the learner, so it is also the only moment we can use to
+shape what the scene will demand. The `markerHint` line that goes into the
+prompt for an opening with deck words on the deck is `今回は new を1つ、deck を
+1つ以上` — at least one `deck` marker, not "up to one". A deck marker on the
+partner's own line is what proves the deck word is in play: a model that
+produces an opening without the marker is not honouring the engineering
+instruction, because the marker is the partner's signature on the requirement.
+The marker also keeps the deck distinguishable in the transcript — the
+learner can see at the partner's first line which deck word this scene is
+going to demand.
 
 ### Visibility
 

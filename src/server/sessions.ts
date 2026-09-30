@@ -3,7 +3,7 @@ import { db } from "./db";
 import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
 import { buildDebrief } from "./debrief";
-import { getFumbleDeck, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
+import { clearDeckNaturals, getFumbleDeck, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
 import { getGrammarPoint, pickGrammarPoint } from "./grammarPoints";
 import type {
   Debrief,
@@ -446,12 +446,24 @@ export interface FumbleCapture {
  *
  * The quiet correction is stored on the *learner's* turn, not the partner's. It
  * is a rephrasing of what the learner said, and it belongs under what they said.
- *
- * Fumbles ride the same transaction: either both the turn and the deck row
- * commit, or neither does. A fumble the model reported but the DB did not write
- * would be invisible — and the deck is the only honest signal we have that
- * detection is alive, so it has to be kept honest.
+  *
+  * Fumbles ride the same transaction: either both the turn and the deck row
+  * commit, or neither does. A fumble the model reported but the DB did not write
+  * would be invisible — and the deck is the only honest signal we have that
+  * detection is alive, so it has to be kept honest.
+  *
+  * Deck clearance rides the same transaction: the naturals the model reports as
+  * produced in `clearDeck` clear their fumble rows here, in the same commit.
+  * A SIGKILL between turn and clearance is impossible because there is no
+  * between — there is only one `db.transaction`. A fumble the deck failed to
+  * clear is a fumble that did not commit at all.
  */
+/**
+ * The deck naturals the model reported as produced on this exchange, in their
+ * trimmed form.
+ */
+export type ClearDeck = string[];
+
 export const commitExchange = db.transaction(
   (
     sessionId: string,
@@ -459,6 +471,7 @@ export const commitExchange = db.transaction(
     partner: NewTurn,
     sprint: Sprint,
     fumbles: FumbleCapture | null = null,
+    clearDeck: ClearDeck | null = null,
   ): { learnerTurn: Turn | null; partnerTurn: Turn } => {
     const sprintId = sprint.id;
     const now = Date.now();
@@ -484,6 +497,9 @@ export const commitExchange = db.transaction(
         fumbles.detected,
       );
     }
+    if (learnerTurn && clearDeck && clearDeck.length > 0) {
+      clearDeckNaturals(clearDeck);
+    }
     return { learnerTurn, partnerTurn };
   },
 );
@@ -500,6 +516,11 @@ export interface Boundary {
   opening: NewTurn | null;
   /** Fumbles captured on the closing learner's turn, if there was one. */
   fumbles: FumbleCapture | null;
+  /**
+   * Deck naturals the learner produced on the closing turn. Cleared inside the
+   * boundary transaction so a closed scene and a shrunken deck commit together.
+   */
+  clearDeck: ClearDeck | null;
   /**
    * Optional drill partner turn to issue right after the closing line, on the
    * worst fumble of the sprint. Belongs to the closing sprint so the deck and
@@ -578,6 +599,12 @@ export const commitBoundary = db.transaction(
         boundary.fumbles.situation,
         boundary.fumbles.detected,
       );
+    }
+    // Deck clearance rides the boundary transaction for the same atomicity
+    // reason it rides `commitExchange`: a turn on disk and a deck that did not
+    // shrink between them is a silent regression.
+    if (learnerTurn && boundary.clearDeck && boundary.clearDeck.length > 0) {
+      clearDeckNaturals(boundary.clearDeck);
     }
 
     // The closing exchange belongs to the scene, so it is written before the scene
