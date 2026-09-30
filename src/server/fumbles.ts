@@ -118,16 +118,23 @@ export const insertFumbles = (
 /**
  * Mark every uncleared moment of one natural form as produced.
  *
- * Called from inside the turn transaction when the model reports the learner said
- * the deck word unprompted. A fumble that was already cleared is left alone: the
- * timestamp of the first success is the one the deck history records, so a later
- * re-production does not overwrite it.
+ * Must be called from inside the turn transaction (`commitExchange` or
+ * `commitBoundary`). The function does not open a transaction of its own; the
+ * caller is expected to be inside one already, so the turn write and the deck
+ * clearance commit together or not at all. Calling this outside a turn
+ * transaction is a silent regression: a SIGKILL between the turn and the deck
+ * update leaves the deck holding entries the learner already produced, and the
+ * deck size grows stale in the moments before the learner misses.
+ *
+ * A fumble that was already cleared is left alone: the timestamp of the first
+ * success is the one the deck history records, so a later re-production does
+ * not overwrite it.
  *
  * Returns the naturals that were actually advanced. A learner might produce a
- * string the deck has never heard of, in which case nothing is cleared — and that
- * is fine; the deck only shrinks for words it was already targeting.
+ * string the deck has never heard of, in which case nothing is cleared — and
+ * that is fine; the deck only shrinks for words it was already targeting.
  */
-export const clearDeckNaturals = (naturals: readonly string[]): string[] => {
+export function clearDeckNaturals(naturals: readonly string[]): string[] {
   if (naturals.length === 0) return [];
   const now = Date.now();
   const stmt = db.prepare(

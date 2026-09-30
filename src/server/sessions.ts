@@ -425,6 +425,31 @@ function touchSprintStart(sprintId: string | null, startedAt: number | null, now
 }
 
 /**
+ * Persist the fumbles the model reported on this exchange, inside whatever
+ * turn transaction is currently open.
+ *
+ * Both `commitExchange` and `commitBoundary` end up doing this; the helper
+ * keeps the call shape (and the rule that no fumble is written without a
+ * learner turn to attach it to) in one place.
+ */
+function captureLearnerFumbles(
+  sessionId: string,
+  sprintId: string,
+  learnerTurnId: number,
+  capture: FumbleCapture | null,
+): void {
+  if (!capture || capture.detected.length === 0) return;
+  insertFumbles(
+    sessionId,
+    sprintId,
+    learnerTurnId,
+    capture.learnerSaid,
+    capture.situation,
+    capture.detected,
+  );
+}
+
+/**
  * The fumbles captured from this exchange, ready to land in the deck.
  *
  * Passed in only when there is a learner turn to attribute the moments to; the
@@ -487,15 +512,8 @@ export const commitExchange = db.transaction(
       partner,
       now,
     );
-    if (learnerTurn && fumbles && fumbles.detected.length > 0) {
-      insertFumbles(
-        sessionId,
-        sprintId,
-        learnerTurn.id,
-        fumbles.learnerSaid,
-        fumbles.situation,
-        fumbles.detected,
-      );
+    if (learnerTurn) {
+      captureLearnerFumbles(sessionId, sprintId, learnerTurn.id, fumbles);
     }
     if (learnerTurn && clearDeck && clearDeck.length > 0) {
       clearDeckNaturals(clearDeck);
@@ -590,15 +608,8 @@ export const commitBoundary = db.transaction(
           now,
         )
       : null;
-    if (learnerTurn && boundary.fumbles && boundary.fumbles.detected.length > 0) {
-      insertFumbles(
-        sessionId,
-        sprint.id,
-        learnerTurn.id,
-        boundary.fumbles.learnerSaid,
-        boundary.fumbles.situation,
-        boundary.fumbles.detected,
-      );
+    if (learnerTurn) {
+      captureLearnerFumbles(sessionId, sprint.id, learnerTurn.id, boundary.fumbles);
     }
     // Deck clearance rides the boundary transaction for the same atomicity
     // reason it rides `commitExchange`: a turn on disk and a deck that did not

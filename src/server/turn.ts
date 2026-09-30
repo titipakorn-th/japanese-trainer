@@ -20,7 +20,6 @@ import {
   type NewTurn,
 } from "./sessions";
 import {
-  clearDeckNaturals,
   getFumbleDeck,
   getFumbleDeckSize,
   insertFumbles,
@@ -105,6 +104,24 @@ function looksJapanese(text: string): boolean {
 /** The next sprint in the plan, or null when this one was the last. */
 function nextSprint(sprints: Sprint[], seq: number): Sprint["brief"] | null {
   return sprints.find((s) => s.seq === seq + 1)?.brief ?? null;
+}
+
+/**
+ * The most recent partner line in a sequence of turns, with a fallback for the
+ * case where there isn't one (an opening turn, or a learner reply that the
+ * partner never answered).
+ *
+ * Used both as the situation a fumble happened in (what the learner was
+ * reacting to) and as the prompt line a drill has to follow up on. The
+ * fallback is the scene's goal so a turn with no partner line still has a
+ * sentence to anchor a capture against.
+ */
+function lastPartnerLine(turns: Turn[], fallback: string): string {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i]!;
+    if (t.role === "partner") return t.text;
+  }
+  return fallback;
 }
 
 /** Goals of the scenes already run, so the partner knows where it is. */
@@ -339,8 +356,7 @@ export async function runTurn(
       // learner was responding to when they reached for the wrong word. Captured
       // here, not deeper inside `commitExchange`, because the closing call below
       // uses the same field and a single source is easier to keep honest.
-      const lastPartner = [...inSprint].reverse().find((t) => t.role === "partner");
-      const situation = lastPartner?.text ?? sprint.brief.goal;
+      const situation = lastPartnerLine(inSprint, sprint.brief.goal);
       const capture =
         learnerText !== null && parsed.fumbles.length > 0
           ? { detected: parsed.fumbles, situation, learnerSaid: learnerText }
@@ -363,13 +379,14 @@ export async function runTurn(
         },
         sprint,
         capture,
+        // Deck clearance rides the same transaction as the turn via the
+        // `clearDeck` parameter on `commitExchange` — a learner turn on disk and
+        // a deck that did not shrink between them is impossible. The ADR 0006
+        // promise is enforced by where the call happens, not by a post-commit
+        // step that could be interrupted.
+        parsed.produced.length > 0 ? parsed.produced : null,
       );
 
-      // Deck clearance is the second half of the deck lifecycle. The model just
-      // reported which deck words the learner produced naturally; clearing them
-      // here, right after the turn commits, keeps the rail honest — the size
-      // the learner reads off the next frame is the size that landed on disk.
-      if (parsed.produced.length > 0) clearDeckNaturals(parsed.produced);
       const fumbleDeck = getFumbleDeck();
 
       emit({
@@ -432,8 +449,7 @@ export async function runTurn(
     // The closing learner's turn is still in scope for fumble capture. Its
     // situation is the partner's last line in the closing scene — same field as
     // a mid-scene reply, so the debrief and the deck read the same way.
-    const lastPartner = [...history].reverse().find((t) => t.role === "partner");
-    const closingSituation = lastPartner?.text ?? sprint.brief.goal;
+    const closingSituation = lastPartnerLine(history, sprint.brief.goal);
     const fumbleCapture =
       learnerText !== null && closing.fumbles.length > 0
         ? { detected: closing.fumbles, situation: closingSituation, learnerSaid: learnerText }
@@ -472,12 +488,12 @@ export async function runTurn(
         ? { role: "partner", text: opening.text, naturalPhrasing: null, markers: opening.markers }
         : null,
       fumbles: fumbleCapture,
+      // The closing learner's turn can produce a deck word too. Clearance
+      // rides the boundary transaction for the same atomicity reason as a
+      // mid-scene reply.
+      clearDeck: closing.produced.length > 0 ? closing.produced : null,
       drill,
     });
-
-    // The closing learner's turn can produce a deck word too. Clearing after the
-    // boundary commits so the size the rail shows is the one that landed.
-    if (closing.produced.length > 0) clearDeckNaturals(closing.produced);
 
     const status = result.nextSprint ? "active" : "ended";
     const fumbleDeck = getFumbleDeck();
