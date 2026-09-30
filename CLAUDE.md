@@ -27,6 +27,17 @@ source of truth, so a reload resumes and a failed model call cannot lose the thr
 A learner's turn and the partner's reply commit in one transaction, or not at all.
 See `docs/adr/0003-turn-atomicity.md`.
 
+## Detection prompts are silent-regression hazards
+
+The fumble detection prompt in `src/server/prompt.ts` is the load-bearing piece of
+the project: a regression there is invisible to the conversation itself while the
+Fumble Deck silently stops filling. There are no automated tests for detection.
+
+Whenever `src/server/prompt.ts` is touched — the worked example, the fumble
+instructions, the markers block — drive the app, type a deliberately bad turn, and
+confirm the deck count on the coach rail went up. A deck that stopped growing is a
+regression even when nothing else looks broken.
+
 ## Agent skills
 
 ### Issue tracker

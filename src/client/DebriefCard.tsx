@@ -1,6 +1,6 @@
 "use client";
 
-import type { Debrief, Fumble, FumbleReason } from "@/lib/types";
+import type { Debrief, Fumble } from "@/lib/types";
 
 /**
  * What happened in a sprint, in the place the sprint happened.
@@ -21,13 +21,6 @@ import type { Debrief, Fumble, FumbleReason } from "@/lib/types";
  * still appear in the list — the drill is not a pass on the moment, it is a
  * retry — but the marker makes the trajectory legible at a glance.
  */
-
-const REASON_LABEL: Record<FumbleReason, string> = {
-  abandoned: "abandoned",
-  compressed: "compressed",
-  hedged: "hedged",
-  "wrong-form": "wrong-form",
-};
 
 export function DebriefCard({ debrief }: { debrief: Debrief }) {
   return (
@@ -81,7 +74,7 @@ function FumbleList({ fumbles }: { fumbles: Fumble[] }) {
         <div key={f.id} className="fumble-row" data-drilled={f.drilled ? "1" : "0"}>
           <div className="fumble-reason-row">
             <div className="fumble-reason" data-reason={f.reason}>
-              {REASON_LABEL[f.reason]}
+              {f.reason}
             </div>
             {f.drilled ? (
               <div className="fumble-drilled" title="The partner asked the learner to retry this one">

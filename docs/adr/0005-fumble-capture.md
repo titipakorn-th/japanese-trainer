@@ -49,9 +49,9 @@ A fumble marker on a learner turn reuses the existing `Marker` shape with
 `kind: "fumble"`:
 
 - `surface` — the substring of learner text the marker underlines (amber, wavy, △)
-- `reading` — empty (the surface is often English, and the gloss is the Japanese)
+- `reading` — empty (the surface is often English, and the gloss carries the natural form in `meaning`)
 - `meaning` — the natural form
-- `example` — a sentence using the natural form
+- `example` — empty (the marker shares the gloss dialog with vocabulary markers, but a fumble has no separate example sentence; the natural form in `meaning` is the actionable thing)
 
 Tapping the marker opens the existing gloss dialog, which already reads `surface`,
 `reading`, and `meaning` — the only thing the dialog has to absorb for a fumble is
