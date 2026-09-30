@@ -15,6 +15,11 @@ import type { Debrief, Fumble, FumbleReason } from "@/lib/types";
  * `said → natural` shape, so the feedback the learner reads after the sprint is
  * one card rather than three. Each fumble carries the reason it was flagged, so
  * a learner who saw themselves abandon the turn can see the app saw it too.
+ *
+ * A drilled fumble carries a `drilled` marker so the learner can see which
+ * moments the partner pulled them out of the conversation for. Drilled rows
+ * still appear in the list — the drill is not a pass on the moment, it is a
+ * retry — but the marker makes the trajectory legible at a glance.
  */
 
 const REASON_LABEL: Record<FumbleReason, string> = {
@@ -73,9 +78,16 @@ function FumbleList({ fumbles }: { fumbles: Fumble[] }) {
     <div className="fumble-list">
       <div className="fumble-list-head">Fumbles</div>
       {fumbles.map((f) => (
-        <div key={f.id} className="fumble-row">
-          <div className="fumble-reason" data-reason={f.reason}>
-            {REASON_LABEL[f.reason]}
+        <div key={f.id} className="fumble-row" data-drilled={f.drilled ? "1" : "0"}>
+          <div className="fumble-reason-row">
+            <div className="fumble-reason" data-reason={f.reason}>
+              {REASON_LABEL[f.reason]}
+            </div>
+            {f.drilled ? (
+              <div className="fumble-drilled" title="The partner asked the learner to retry this one">
+                drilled
+              </div>
+            ) : null}
           </div>
           <div className="quiet-row">
             <span className="said jp">{f.surface || f.learnerSaid}</span>

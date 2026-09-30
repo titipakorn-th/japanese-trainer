@@ -449,12 +449,14 @@ export async function runTurn(
      * call is already what the partner said; deciding what to drill is a
      * separate judgement that should not ride the same call.
      *
-     * No drill is issued when there is no fumble, or when the session clock
+     * No drill is issued when there is no fumble, when the session clock
      * is what ended the sprint (the closing line of a session-clock ending
-     * does not invite a retry — the session is over). Otherwise we issue
-     * exactly one drill, on the freshest uncleared fumble.
+     * does not invite a retry — the session is over), or when there is no
+     * next scene to open into. Otherwise we issue exactly one drill, on the
+     * freshest uncleared fumble.
      */
-    const worstFumble = endedBy === "session-clock" ? null : worstFumbleForSprint(sprint.id);
+    const worstFumble =
+      endedBy === "session-clock" || !next ? null : worstFumbleForSprint(sprint.id);
     const drill = worstFumble
       ? {
           text: drillPromptLine(worstFumble.natural, worstFumble.surface || null),
@@ -613,9 +615,9 @@ async function handleDrillResponse(
    * been asked to break character briefly and is back in role now.
    *
    * Sprint-end drill: the next scene. Opening it here means the drill response
-   * and the next opening are read by the model as the same exchange, which is
-   * what lets the partner acknowledge the retry and then greet the new scene
-   * without an intermediate "hi, I'm back" that the learner did not write.
+   * commits, the deck marks itself as drilled if the natural form was produced,
+   * and the learner sees the next scene's opening on the same frame that
+   * acknowledged the retry.
    */
   const targetSprint: Sprint | null = isSprintEnd
     ? openNextSprint(sessionId, drillSprint.seq)
@@ -638,12 +640,16 @@ async function handleDrillResponse(
     return;
   }
 
-  // Mid-conversation drills replay the active sprint's prior turns so the model
-  // sees the scene it is in. Sprint-end drills replay the closing sprint's turns
-  // (the partner was in character there) but ask for the next scene's opening.
-  const sprintTurns = isSprintEnd
-    ? getTurns(sessionId).filter((t) => t.sprintId === drillSprint.id)
-    : getTurns(sessionId).filter((t) => t.sprintId === drillSprint.id);
+  // The history passed to the model is the sprint's turns before the drill
+  // response we just committed — including the drill partner turn, since that
+  // is the last line the partner said. The drill response itself is sent as
+  // the current user message for mid-conversation drills, or replaced by the
+  // standard "learner arrived" placeholder for sprint-end drills so the
+  // opening prompt sees the new scene rather than a continuation.
+  const allTurns = getTurns(sessionId);
+  const sprintTurns = allTurns
+    .filter((t) => t.sprintId === (isSprintEnd ? drillSprint.id : targetSprint.id))
+    .filter((t) => t.id !== written.id);
 
   const ask = async (ctx: PromptContext, history: Turn[], learnerLine: string): Promise<ParsedReply | null> => {
     const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
@@ -768,7 +774,7 @@ function openNextSprint(sessionId: string, afterSeq: number): Sprint | null {
   if (!next) return null;
   // The plan row was written at session start; this is a regular `openSprint`
   // under a fresh `active` status. The clock starts on the next model call.
-  return openPlannedSprint(sessionId, afterSeq + 1, next);
+  return openSprint(sessionId, afterSeq + 1, next, Date.now());
 }
 
 function lastPartnerOfSprint(sprint: Sprint): Turn {
