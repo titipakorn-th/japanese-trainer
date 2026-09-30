@@ -17,7 +17,6 @@ import {
   getSession,
   getSprints,
   getTurns,
-  openSprint,
   type NewTurn,
 } from "./sessions";
 import {
@@ -614,17 +613,24 @@ async function handleDrillResponse(
    * The continuation is a normal reply in the same scene — the model has just
    * been asked to break character briefly and is back in role now.
    *
-   * Sprint-end drill: the next scene. Opening it here means the drill response
-   * commits, the deck marks itself as drilled if the natural form was produced,
-   * and the learner sees the next scene's opening on the same frame that
-   * acknowledged the retry.
+   * Sprint-end drill: the next scene. The boundary has already opened it and
+   * committed the opening line, so the next partner turn is a reply to the
+   * learner rather than a fresh opening. `getActiveSprint` is the right call
+   * here — calling `openSprint` again would re-run its `UPDATE sprint SET
+   * status='active', started_at=?` statement, which silently resets the
+   * scene's clock to the moment the drill response arrived. The drill is
+   * already a clock tax on the learner; the scene's clock should keep the
+   * opening line as its origin.
    */
   const targetSprint: Sprint | null = isSprintEnd
-    ? openNextSprint(sessionId, drillSprint.seq)
+    ? getActiveSprint(sessionId)
     : drillSprint;
   if (!targetSprint) {
-    // No next scene means the session is over. The drill response committed,
-    // and the learner has seen the drill prompt — nothing more to do here.
+    // The boundary drill is only emitted when there is a next scene to open
+    // into (see the carve-out in the boundary code), so reaching here means
+    // the session has been abandoned between the boundary and the drill
+    // response. The drill response is on the transcript; the wrap panel
+    // takes over once the client renders `status: "ended"`.
     emit({
       t: "done",
       learnerTurn: written,
@@ -640,15 +646,14 @@ async function handleDrillResponse(
     return;
   }
 
-  // The history passed to the model is the sprint's turns before the drill
-  // response we just committed — including the drill partner turn, since that
-  // is the last line the partner said. The drill response itself is sent as
-  // the current user message for mid-conversation drills, or replaced by the
-  // standard "learner arrived" placeholder for sprint-end drills so the
-  // opening prompt sees the new scene rather than a continuation.
+  // The history passed to the model is the sprint's prior turns — including
+  // the drill partner turn, since that is the last line the partner said,
+  // and excluding the drill response we just committed, which is the current
+  // user message. For sprint-end drills, the prior turns are the next scene's
+  // opening line, which the boundary already committed.
   const allTurns = getTurns(sessionId);
   const sprintTurns = allTurns
-    .filter((t) => t.sprintId === (isSprintEnd ? drillSprint.id : targetSprint.id))
+    .filter((t) => t.sprintId === targetSprint.id)
     .filter((t) => t.id !== written.id);
 
   const ask = async (ctx: PromptContext, history: Turn[], learnerLine: string): Promise<ParsedReply | null> => {
@@ -702,22 +707,22 @@ async function handleDrillResponse(
 
   try {
     const earlier = earlierGoals(sprints, targetSprint.seq);
-    // Mid-conversation drills pass the drill response as the user message so
-    // the model knows what the learner just said; sprint-end drills pass the
-    // arrival placeholder because the response is the first utterance of the
-    // new scene rather than an answer to anything.
-    const learnerLine = isSprintEnd ? "（学習者が来た）" : learnerText;
+    // Both mid-conversation and sprint-end drills pass the drill response as
+    // the user message — the model needs to know what the learner just said
+    // before it can produce a continuation. Sprint-end drills model a
+    // "reply" rather than an "opening" because the next scene's opening line
+    // was already committed by the boundary.
     const parsed = await ask(
       {
         brief: targetSprint.brief,
-        moment: isSprintEnd ? "opening" : "reply",
+        moment: "reply",
         stance: "plain",
         earlier,
         deckWords: activeDeckWords(),
         grammarPoint: getSession(sessionId)?.grammarPoint ?? null,
       },
       sprintTurns,
-      learnerLine,
+      learnerText,
     );
     if (parsed === null) return;
 
@@ -761,22 +766,16 @@ async function handleDrillResponse(
 }
 
 /**
- * Open the next planned sprint in the session's plan, or null when the plan
- * has run out.
+ * A sentinel partner turn for the rare drill-response path that has no live
+ * partner continuation to emit.
  *
- * Lifted out so the drill response handler can pick the right continuation
- * sprint without duplicating the open-or-return-null logic that the boundary
- * already knows.
+ * The boundary code never issues a drill on the final sprint (there is
+ * nothing to continue into), so this branch only fires when the session is
+ * abandoned between the boundary and the drill response — a window of a
+ * few seconds at most. The sentinel exists so the `done` event still has a
+ * turn to carry, the client still has a status to render, and the wrap
+ * panel still takes over from the composer on the next paint.
  */
-function openNextSprint(sessionId: string, afterSeq: number): Sprint | null {
-  const sprints = getSprints(sessionId);
-  const next = nextSprint(sprints, afterSeq);
-  if (!next) return null;
-  // The plan row was written at session start; this is a regular `openSprint`
-  // under a fresh `active` status. The clock starts on the next model call.
-  return openSprint(sessionId, afterSeq + 1, next, Date.now());
-}
-
 function lastPartnerOfSprint(sprint: Sprint): Turn {
   return {
     id: -1,
