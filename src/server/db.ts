@@ -36,31 +36,54 @@ function sprintTable(name: string): string {
 
 const SPRINT_TABLE = sprintTable("IF NOT EXISTS sprint");
 
+const FUMBLE_TABLE = `
+CREATE TABLE IF NOT EXISTS fumble (
+  id            TEXT PRIMARY KEY,
+  surface       TEXT NOT NULL,
+  natural       TEXT NOT NULL,
+  learner_said  TEXT NOT NULL,
+  situation     TEXT NOT NULL,
+  reason        TEXT NOT NULL CHECK (reason IN ('abandoned', 'compressed', 'hedged', 'wrong-form')),
+  session_id    TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  sprint_id     TEXT REFERENCES sprint(id) ON DELETE SET NULL,
+  turn_id       INTEGER REFERENCES turn(id) ON DELETE SET NULL,
+  created_at    INTEGER NOT NULL,
+  drilled       INTEGER NOT NULL DEFAULT 0,
+  cleared_at    INTEGER
+);`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session (
   id         TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL,
   scenario   TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'active',
-  ended_at   INTEGER
+  ended_at   INTEGER,
+  grammar_point_slug TEXT
 );
 
 ${SPRINT_TABLE}
 
 CREATE TABLE IF NOT EXISTS turn (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-  seq        INTEGER NOT NULL,
-  role       TEXT NOT NULL CHECK (role IN ('partner', 'learner')),
-  text       TEXT NOT NULL,
-  natural    TEXT,
-  markers    TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id     TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  seq            INTEGER NOT NULL,
+  role           TEXT NOT NULL CHECK (role IN ('partner', 'learner')),
+  text           TEXT NOT NULL,
+  natural        TEXT,
+  markers        TEXT NOT NULL DEFAULT '[]',
+  drill_natural  TEXT,
+  created_at     INTEGER NOT NULL,
   UNIQUE (session_id, seq)
 );
 
 CREATE INDEX IF NOT EXISTS turn_session_seq ON turn (session_id, seq);
 CREATE INDEX IF NOT EXISTS sprint_session_seq ON sprint (session_id, seq);
+
+${FUMBLE_TABLE}
+CREATE INDEX IF NOT EXISTS fumble_natural ON fumble (natural);
+CREATE INDEX IF NOT EXISTS fumble_session ON fumble (session_id);
+CREATE INDEX IF NOT EXISTS fumble_sprint ON fumble (sprint_id);
 `;
 
 /**
@@ -75,6 +98,10 @@ const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
   ["session", "ended_at", "INTEGER"],
   ["turn", "sprint_id", "TEXT"],
   ["turn", "response_ms", "INTEGER"],
+  ["turn", "drill_natural", "TEXT"],
+  ["fumble", "drilled", "INTEGER NOT NULL DEFAULT 0"],
+  ["fumble", "cleared_at", "INTEGER"],
+  ["session", "furigana_on", "INTEGER NOT NULL DEFAULT 0"],
 ];
 
 /** Columns renamed in place, when the old name is present and the new one is not. */

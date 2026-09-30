@@ -1,6 +1,7 @@
 import { humanDuration, humanMs, meanMs, responseTimes } from "@/lib/measure";
 import { stanceTrail } from "./stance";
-import type { Debrief, DebriefLine, Marker, Sprint, SprintEnding, Turn } from "@/lib/types";
+import { getSprintFumbles } from "./fumbles";
+import type { Debrief, DebriefLine, Fumble, Marker, Sprint, SprintEnding, Turn } from "@/lib/types";
 
 /**
  * What happened in a sprint, in a few lines the learner can act on.
@@ -12,8 +13,10 @@ import type { Debrief, DebriefLine, Marker, Sprint, SprintEnding, Turn } from "@
  * was said, what was corrected, and how long the learner took — and where the
  * numbers are thin it says nothing rather than guessing.
  *
- * Fumble capture is its own slice, so the deck is not in here yet. When it
- * lands, the retry of the worst fumble goes at the top of this card.
+ * Fumbles ride with the rest of the debrief. The card lists every moment the
+ * deck captured during this sprint, paired with the situation it happened in,
+ * so the learner can see what they reached for and what would have been
+ * natural. The drill of the worst one lives in its own slice.
  */
 
 /** Distinct surfaces, first met first, so a word used twice is not counted twice. */
@@ -150,6 +153,7 @@ export function buildDebrief(
     avgResponseMs,
     words,
     corrections,
+    fumbles: getSprintFumbles(sprint.id),
     lines,
   };
 }

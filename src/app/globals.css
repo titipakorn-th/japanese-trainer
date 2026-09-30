@@ -1,10 +1,12 @@
 /*
- * Colour semantics, defined once. Four colours carry meaning across the whole
+ * Colour semantics, defined once. Five colours carry meaning across the whole
  * interface: accent red for the learner's own turns and primary actions, blue
- * for a New Word, amber for a Fumble, purple for the Grammar Point.
+ * for a New Word, amber for a Fumble, purple for the Grammar Point, teal for a
+ * Deck Word — a word the learner has fumbled before and that this session is
+ * engineering back into the conversation.
  *
  * Colour is never the only signal. Every marker also differs by underline style
- * and by an explicit label, so the three stay apart in greyscale, in bright sun,
+ * and by an explicit label, so the four stay apart in greyscale, in bright sun,
  * and to a reader who does not separate red from green.
  */
 :root {
@@ -30,6 +32,10 @@
   --grammar: #8f7ae0;
   --grammar-soft: #241f3d;
   --grammar-ink: #cfc2ff;
+
+  --deck: #38c6b5;
+  --deck-soft: #13332f;
+  --deck-ink: #b3ece2;
 
   --jp: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo,
     sans-serif;

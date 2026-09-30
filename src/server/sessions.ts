@@ -3,6 +3,7 @@ import { db } from "./db";
 import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
 import { buildDebrief } from "./debrief";
+import { getFumbleDeck, insertFumbles, type DetectedFumble } from "./fumbles";
 import type {
   Debrief,
   Marker,
@@ -214,12 +215,18 @@ export function getSessionState(id: string): SessionState | null {
   const session = getSession(id);
   if (!session) return null;
   const sprints = getSprints(id);
+  // The deck is read fresh every snapshot. It is small, and reading it on every
+  // page load is what makes the rail honest — a learner who reloads mid-session
+  // sees the count they earned before the reload, not a stale zero.
+  const fumbleDeck = getFumbleDeck();
   return {
     session,
     turns: getTurns(id),
     sprints,
     activeSprint: getActiveSprint(id),
     pacing: pacing(),
+    fumbleDeck,
+    fumbleDeckSize: fumbleDeck.length,
   };
 }
 
@@ -345,6 +352,19 @@ function touchSprintStart(sprintId: string | null, startedAt: number | null, now
 }
 
 /**
+ * The fumbles captured from this exchange, ready to land in the deck.
+ *
+ * Passed in only when there is a learner turn to attribute the moments to; the
+ * deck gains rows in the same transaction as the turn, so a half-applied commit
+ * cannot leave fumbles orphaned against a turn that was never written.
+ */
+export interface FumbleCapture {
+  detected: DetectedFumble[];
+  situation: string;
+  learnerSaid: string;
+}
+
+/**
  * Commit a whole exchange, or nothing.
  *
  * A learner's turn and the partner's reply land in one transaction. The stream
@@ -353,6 +373,11 @@ function touchSprintStart(sprintId: string | null, startedAt: number | null, now
  *
  * The quiet correction is stored on the *learner's* turn, not the partner's. It
  * is a rephrasing of what the learner said, and it belongs under what they said.
+ *
+ * Fumbles ride the same transaction: either both the turn and the deck row
+ * commit, or neither does. A fumble the model reported but the DB did not write
+ * would be invisible — and the deck is the only honest signal we have that
+ * detection is alive, so it has to be kept honest.
  */
 export const commitExchange = db.transaction(
   (
@@ -360,6 +385,7 @@ export const commitExchange = db.transaction(
     learner: (NewTurn & { responseMs: number | null }) | null,
     partner: NewTurn,
     sprint: Sprint,
+    fumbles: FumbleCapture | null = null,
   ): { learnerTurn: Turn | null; partnerTurn: Turn } => {
     const sprintId = sprint.id;
     const now = Date.now();
@@ -375,6 +401,16 @@ export const commitExchange = db.transaction(
       partner,
       now,
     );
+    if (learnerTurn && fumbles && fumbles.detected.length > 0) {
+      insertFumbles(
+        sessionId,
+        sprintId,
+        learnerTurn.id,
+        fumbles.learnerSaid,
+        fumbles.situation,
+        fumbles.detected,
+      );
+    }
     return { learnerTurn, partnerTurn };
   },
 );
@@ -389,6 +425,8 @@ export interface Boundary {
   next: SprintBrief | null;
   /** The next scene's opening line. Null when there is no next scene. */
   opening: NewTurn | null;
+  /** Fumbles captured on the closing learner's turn, if there was one. */
+  fumbles: FumbleCapture | null;
 }
 
 /**
@@ -429,6 +467,16 @@ export const commitBoundary = db.transaction(
       boundary.closing,
       now,
     );
+    if (learnerTurn && boundary.fumbles && boundary.fumbles.detected.length > 0) {
+      insertFumbles(
+        sessionId,
+        sprint.id,
+        learnerTurn.id,
+        boundary.fumbles.learnerSaid,
+        boundary.fumbles.situation,
+        boundary.fumbles.detected,
+      );
+    }
 
     // The closing exchange belongs to the scene, so it is written before the scene
     // is closed and the debrief is built from what is now on disk rather than

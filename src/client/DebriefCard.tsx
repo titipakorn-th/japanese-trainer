@@ -1,6 +1,6 @@
 "use client";
 
-import type { Debrief } from "@/lib/types";
+import type { Debrief, Fumble, FumbleReason } from "@/lib/types";
 
 /**
  * What happened in a sprint, in the place the sprint happened.
@@ -9,9 +9,21 @@ import type { Debrief } from "@/lib/types";
  * feedback arrives while the moment is still fresh — which is the entire reason
  * the session is 4–6 short scenes rather than one half hour. Everything on it is
  * counted from committed turns; there is no model opinion of the learner on this
- * card, and a fumble's second attempt goes at the top of it once fumble capture
- * lands.
+ * card.
+ *
+ * Fumbles are listed alongside the corrections and the new words, in the same
+ * `said → natural` shape, so the feedback the learner reads after the sprint is
+ * one card rather than three. Each fumble carries the reason it was flagged, so
+ * a learner who saw themselves abandon the turn can see the app saw it too.
  */
+
+const REASON_LABEL: Record<FumbleReason, string> = {
+  abandoned: "abandoned",
+  compressed: "compressed",
+  hedged: "hedged",
+  "wrong-form": "wrong-form",
+};
+
 export function DebriefCard({ debrief }: { debrief: Debrief }) {
   return (
     <article className="debrief" aria-label={`Sprint ${debrief.seq} debrief`}>
@@ -50,6 +62,29 @@ export function DebriefCard({ debrief }: { debrief: Debrief }) {
           ))}
         </div>
       ) : null}
+
+      {debrief.fumbles.length ? <FumbleList fumbles={debrief.fumbles} /> : null}
     </article>
+  );
+}
+
+function FumbleList({ fumbles }: { fumbles: Fumble[] }) {
+  return (
+    <div className="fumble-list">
+      <div className="fumble-list-head">Fumbles</div>
+      {fumbles.map((f) => (
+        <div key={f.id} className="fumble-row">
+          <div className="fumble-reason" data-reason={f.reason}>
+            {REASON_LABEL[f.reason]}
+          </div>
+          <div className="quiet-row">
+            <span className="said jp">{f.surface || f.learnerSaid}</span>
+            <span className="arrow">→</span>
+            <span className="phrase jp">{f.natural}</span>
+          </div>
+          <div className="fumble-situation jp">{f.situation}</div>
+        </div>
+      ))}
+    </div>
   );
 }
