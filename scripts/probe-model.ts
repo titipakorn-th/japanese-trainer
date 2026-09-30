@@ -96,6 +96,11 @@ async function ask(brief: typeof IZAKAYA_OPENING, moment: Moment, learner: strin
     earlier: [],
     deckWords: [],
     grammarPoint: null,
+    // The probe measures latency and the streaming shape, so the New Word
+    // machinery is stubbed rather than simulated: a probe with a fake word
+    // history in it would be measuring a prompt the app never sends.
+    metWords: [],
+    allowance: { thisSprint: 3, thisTurn: 1 },
   });
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: system },

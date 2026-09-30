@@ -1,7 +1,16 @@
 import { humanDuration, humanMs, meanMs, responseTimes } from "@/lib/measure";
 import { stanceTrail } from "./stance";
 import { getSprintFumbles } from "./fumbles";
-import type { Debrief, DebriefLine, Fumble, Marker, Sprint, SprintEnding, Turn } from "@/lib/types";
+import type {
+  Debrief,
+  DebriefLine,
+  Fumble,
+  Marker,
+  Sprint,
+  SprintEnding,
+  Turn,
+  WordLedger,
+} from "@/lib/types";
 
 /**
  * What happened in a sprint, in a few lines the learner can act on.
@@ -19,15 +28,48 @@ import type { Debrief, DebriefLine, Fumble, Marker, Sprint, SprintEnding, Turn }
  * natural. The drill of the worst one lives in its own slice.
  */
 
-/** Distinct surfaces, first met first, so a word used twice is not counted twice. */
-function distinctWords(turns: Turn[]): Pick<Marker, "surface" | "reading" | "meaning">[] {
+/** One word the sprint met, and whether the session needed it a second time. */
+type RecalledWord = Pick<Marker, "surface" | "reading" | "meaning"> & {
+  kind: "new" | "deck";
+  seenAgain: boolean;
+};
+
+/**
+ * The sprint's words, with whether each was needed a second time.
+ *
+ * `seenAgain` is not decoration. A word the partner used once is a word the learner
+ * can recognise; a word used again later, in a different sentence, is one they can
+ * be asked to produce. It is what lets the card say "this is a recall" rather than
+ * "this is a list", and it is read off the ledger rather than assumed from a count.
+ *
+ * Deck words are in here alongside New Words, and the distinction is carried on
+ * each entry rather than inferred. They are the half of the budget the learner has
+ * failed before, so they are the half where recall is most worth attempting — and
+ * CONTEXT.md gives "New Word" a definition (a word introduced for the first time
+ * in a session) that a deck word does not satisfy, so a card that called them all
+ * New Words would be using the product's own word for something it does not mean.
+ */
+function distinctWords(turns: Turn[], ledger: WordLedger): RecalledWord[] {
   const seen = new Set<string>();
-  const out: Pick<Marker, "surface" | "reading" | "meaning">[] = [];
+  const out: RecalledWord[] = [];
   for (const turn of turns) {
     for (const marker of turn.markers) {
-      if (marker.kind !== "new" || seen.has(marker.surface)) continue;
+      if (marker.kind !== "new" && marker.kind !== "deck") continue;
+      if (seen.has(marker.surface)) continue;
       seen.add(marker.surface);
-      out.push({ surface: marker.surface, reading: marker.reading, meaning: marker.meaning });
+      out.push({
+        surface: marker.surface,
+        reading: marker.reading,
+        meaning: marker.meaning,
+        kind: marker.kind,
+        // `revisited`, not `slots`. The grid the rail draws is capped at the budget,
+        // and a word met past it is in this debrief but absent from the grid — so
+        // asking the grid would report "not needed again" for precisely the words an
+        // overrun produced, which is the one case where the claim matters most. Read
+        // at the boundary, so it reflects the second meetings that had happened by
+        // then and not ones still to come.
+        seenAgain: ledger.revisited.includes(marker.surface),
+      });
     }
   }
   return out;
@@ -77,12 +119,13 @@ export function buildDebrief(
   turns: Turn[],
   endedBy: SprintEnding,
   now: number,
+  ledger: WordLedger,
 ): Debrief {
   const startedAt = sprint.startedAt ?? now;
   const learnerTurns = turns.filter((t) => t.role === "learner");
   const times = responseTimes(learnerTurns);
   const avgResponseMs = meanMs(times);
-  const words = distinctWords(turns);
+  const words = distinctWords(turns, ledger);
   const corrections = quietCorrections(turns);
   // A sprint always ends on the partner's line, so the last learner turn was
   // answered by a closing rather than by a chosen stance.
@@ -102,9 +145,26 @@ export function buildDebrief(
   if (moved) lines.push({ kind: "pace", text: moved });
 
   if (words.length) {
+    // The surfaces are not named here. The card's recall section shows them and
+    // holds the reading and the meaning behind a tap, so listing them in this
+    // line would hand over every answer before the learner has tried to produce
+    // one — turning the recall back into the recognition it was built to replace.
+    // Counted by source rather than totalled, because "New Word" has a definition
+    // and a deck word does not meet it. A sprint with two deck words in it did not
+    // meet two New Words.
+    const fresh = words.filter((w) => w.kind === "new").length;
+    const fromDeck = words.length - fresh;
+    const again = words.filter((w) => w.seenAgain).length;
+    const parts: string[] = [];
+    if (fresh > 0) parts.push(`${fresh} new ${fresh === 1 ? "word" : "words"}`);
+    if (fromDeck > 0) parts.push(`${fromDeck} from the Fumble Deck`);
+    const subject = parts.join(" and ");
+
     lines.push({
       kind: "words",
-      text: `New words met: ${words.map((w) => w.surface).join("、")}.`,
+      text: again
+        ? `${subject} met, and ${again} of ${again === 1 ? "it" : "them"} came round again later. Try to say ${again === 1 ? "it" : "them"} back from memory below.`
+        : `${subject} met, but none came round again this session — so this is a list to read, not a recall to attempt.`,
     });
   } else {
     lines.push({ kind: "words", text: "No new words in this one." });

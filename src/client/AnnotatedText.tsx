@@ -7,6 +7,7 @@ import { segmentForFurigana } from "@/lib/readings";
 /** The label each marker carries, so colour is never the only signal. */
 const LABELS: Record<MarkerKind, { text: string; name: string }> = {
   new: { text: "新", name: "New Word" },
+  revisit: { text: "再", name: "Seen again" },
   fumble: { text: "△", name: "Fumble" },
   grammar: { text: "文", name: "Grammar Point" },
   deck: { text: "戻", name: "From the Fumble Deck" },
@@ -287,6 +288,21 @@ function GlossPopover({
       {marker.reading ? <div className="reading jp">{marker.reading}</div> : null}
       {marker.meaning ? <p className="meaning">{marker.meaning}</p> : null}
       {marker.example ? <p className="example jp">{marker.example}</p> : null}
+      {/*
+        A revisit carries no reading, meaning, or example, and that absence is the
+        point: the partner has already put this word in front of the learner once
+        and the app has handed over what it means. Showing it again here would
+        turn the second meeting into a second recognition, which is the one thing
+        the sprint's recall at the debrief is trying to find out about. The word
+        stays on screen, because the learner has to be able to see that it is back
+        — what they have to do about it is the debrief's problem, not this one's.
+      */}
+      {marker.kind === "revisit" ? (
+        <p className="revisit-note">
+          You met this earlier in this session. The partner needed it again in a different sentence —
+          try to say it at the debrief.
+        </p>
+      ) : null}
       <button type="button" className="gloss-close" onClick={onClose}>
         Close
       </button>

@@ -30,7 +30,10 @@ Use these terms exactly. They are the load-bearing concepts of the product.
   conversations so the learner is forced to retrieve those words again. The
   deck shrinking is the clearest signal of progress.
 - **New Word** — a piece of vocabulary introduced for the first time in a
-  session, met inside a sentence the learner can already mostly follow.
+  session, met inside a sentence the learner can already mostly follow. A New Word
+  is a fact until the partner needs it again later in the session in a different
+  sentence; that second meeting is what turns it into something the learner can
+  produce. See `docs/adr/0007-new-words.md`.
 - **Grammar Point** — the one grammar pattern taught per session, chosen to
   make the learner's sentences shorter. Used several times in the sprint so it
   lands as a pattern, not a memorised phrase.

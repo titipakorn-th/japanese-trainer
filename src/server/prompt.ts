@@ -75,18 +75,58 @@ function stanceLine(stance: Stance, word: WordSeed): string {
   }
 }
 
-/** How many new words this turn may introduce. */
-function markerHint(moment: Moment, stance: Stance, hasDeck: boolean): string {
+/** How many new words this turn may introduce, given what the sprint has left. */
+function markerHint(
+  moment: Moment,
+  stance: Stance,
+  hasDeck: boolean,
+  allowance: { thisSprint: number; thisTurn: number },
+): string {
   if (moment === "closing") return "今回は0個。";
+  const deck = hasDeck ? "deck を0〜1。本文にこの語が入ったら必ず deck で印をつける。" : "";
   if (moment === "opening") {
+    if (allowance.thisSprint <= 0) return `new は0個。${deck}`;
     return hasDeck
       ? "今回は new を1つ、deck を1つまで。相手の語を本文に入れるなら deck のマーカーで囲む。"
       : "今回は new を1つ。";
   }
   if (stance === "give-word") return "今回は new を1つ。今、渡した語。";
+  if (allowance.thisTurn <= 0) return `new は0個。この場面の新しい語はもう十分。${deck}`;
   return hasDeck
-    ? "今回は new を0〜1、deck を0〜1。deck の語を本文に入れるなら deck のマーカーで囲む。"
-    : "今回は0〜2個。";
+    ? `今回は new を0〜${allowance.thisTurn}、deck を0〜1。deck の語を本文に入れるなら deck のマーカーで囲む。`
+    : `今回は new を0〜${allowance.thisTurn}。`;
+}
+
+/**
+ * Words the partner has already used this session, named back so it can need them
+ * again.
+ *
+ * This is the second half of the New Word loop and the half that makes it training
+ * rather than reading. A word met once is a word the learner recognised; the same
+ * word met again later, in a different sentence, is a word they can be asked to
+ * produce. The partner is not asked to teach the word again — it is asked to need
+ * it, which is a different instruction and the one a conversation partner can
+ * actually follow.
+ *
+ * The word is named as a form to work into a sentence, never as a definition to
+ * deliver. Asking a small model to "use this word again" gets it to repeat its
+ * first sentence with the word substituted, which is recognition wearing a
+ * different hat; asking for a different sentence is the only version of the
+ * instruction that leaves the learner with a second frame to hang the word on.
+ */
+function revisitBlock(met: string[]): string {
+  if (met.length === 0) return "";
+  const lines = met.map((surface) => `- ${surface}`).join("\n");
+  return `
+今日すでに出した語:
+${lines}
+
+この中の語を、後のほうの発言で、もう一度使ってください。ただし次が守ること。
+  - 一度目とは「別の文」で使う。さっきと同じ文型で入れ替えただけの文は不可。
+  - もう一度説明しない。翻訳も読みも教えない。学習者は既に見ている語。
+  - 使ったときは kind: "revisit" で印をつける。reading / meaning / example は空文字でいい。
+  - 一つの発言で全部入れない。一語か二語まで。残りは後の発言に回す。
+`;
 }
 
 /** Whether the deck-word engineering instruction needs to appear this turn. */
@@ -118,6 +158,28 @@ function grammarBlock(point: GrammarPoint): string {
 例: ${point.example}
 
 このセッション全体で三回から四回、別の文脈で使ってください。一回の発言に全部詰め込まないでください。文脈が変わるたびに違う文に入れてください。使ったときは markers の kind: "grammar" で本文のその語句に印をつけてください。
+`;
+}
+
+/**
+ * The New Word this scene exists to introduce, named outright on the opening.
+ *
+ * The worked example already shows the word sitting inside this scene's opening
+ * line with a `new` marker on it, and a small model copies that example closely
+ * enough on its own. Naming it as well is belt-and-braces for the one moment the
+ * word has to land: if the opening goes out without it, the scene has no New Word
+ * and the sprint's share of the session budget is spent on nothing.
+ *
+ * The example sentence is quoted rather than paraphrased so the model has a frame
+ * to copy rather than a definition to translate. A partner that has been handed
+ * `meaning` in isolation tends to teach the word; handed an example, it tends to
+ * say the thing.
+ */
+function sceneWordBlock(word: WordSeed, moment: Moment): string {
+  if (moment !== "opening") return "";
+  return `
+この場面の新しい語: ${word.surface}（${word.reading}）＝ ${word.meaning}
+  一回目の発言に自然にこの語を入れる。例: ${word.example}
 `;
 }
 
@@ -156,10 +218,27 @@ export interface PromptContext {
    * to use three or four times across the session.
    */
   grammarPoint: GrammarPoint | null;
+  /**
+   * Words already used this session, for the partner to need again later.
+   *
+   * Empty on the first turn of a session and on any turn where nothing has been
+   * met yet, in which case no revisit instruction appears at all — telling a
+   * partner to reuse words when there are none is an instruction it can only
+   * satisfy by inventing a word.
+   */
+  metWords: string[];
+  /**
+   * How many more New Words the current sprint may carry, and how many this turn
+   * may introduce. The sprint ceiling outranks the session target: a scene with
+   * three new words in it has already stopped being a conversation, and a tenth
+   * word is not worth a stalled scene.
+   */
+  allowance: { thisSprint: number; thisTurn: number };
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
-  const { brief, moment, stance, earlier, deckWords, grammarPoint } = ctx;
+  const { brief, moment, stance, earlier, deckWords, grammarPoint, metWords: met, allowance } =
+    ctx;
   const { word } = brief;
 
   const example = moment === "closing" ? brief.closingLine : brief.openingLine;
@@ -180,15 +259,24 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const deckMarkerItem = exampleDeck
     ? `{"surface": ${JSON.stringify(exampleDeck)}, "kind": "deck", "reading": "", "meaning": "", "example": ""}`
     : "";
+  // A revisit marker, shown only once there is a word worth revisiting. Its three
+  // gloss fields are deliberately empty, and that is the load-bearing part of the
+  // example: a model shown empty strings here emits empty strings, and a revisit
+  // marker that carried a meaning and an example would hand the learner back the
+  // answer at exactly the moment the app is trying to find out whether they have
+  // it. The surface is a word from earlier in the session and is usually not in
+  // this turn's example line, which is the same trade the deck marker already
+  // makes — the shape is what the example is for, and a surface the model fails
+  // to place is dropped rather than mis-rendered.
+  const revisitMarkerItem = met[0]
+    ? `{"surface": ${JSON.stringify(met[0])}, "kind": "revisit", "reading": "", "meaning": "", "example": ""}`
+    : "";
   // The opening example carries a `new` marker; when there's a deck, also show a
-  // `deck` marker so the model sees the right shape. For reply/closing, the
-  // markers block is empty unless deck words happen to appear in this turn.
-  const exampleMarkers =
-    moment === "closing"
-      ? "[]"
-      : deckMarkerItem
-        ? `[${markerItem}, ${deckMarkerItem}]`
-        : `[${markerItem}]`;
+  // `deck` marker, and once words have been met, a `revisit` marker, so the model
+  // sees each shape at the moment it first becomes relevant. For reply/closing,
+  // the markers block is empty unless deck words happen to appear in this turn.
+  const exampleItems = [markerItem, deckMarkerItem, revisitMarkerItem].filter(Boolean);
+  const exampleMarkers = moment === "closing" ? "[]" : `[${exampleItems.join(", ")}]`;
   const fumblesTail =
     moment === "reply"
       ? `, "fumbles": [{"surface": "billing", "natural": "会計", "reason": "hedged"}]`
@@ -227,7 +315,9 @@ ${stanceLine(stance, word)}
 ${momentLine}
 ${GREETING_LINES[moment]}
 ${grammarPoint ? grammarBlock(grammarPoint) : ""}
+${sceneWordBlock(word, moment)}
 ${deckBlock(deckWords)}
+${revisitBlock(met)}
 
 守ること:
 - 日本語だけ。<think></think>タグも英語も説明も前置きも書かない。
@@ -238,6 +328,7 @@ ${deckBlock(deckWords)}
 - 途中で訂正しない。「そうではなく」とは言わない。
 - この場面から出ない。目的から外れない。前の場面の話に戻らない。
 - 語彙はN4を少し超えたくらいまで。
+- 新しい語は「すでにわかっている文のなかに一点だけ置く」形で使う。翻訳も語釈も日本語でない説明も書かない。意味は文脈からとれるようにしています。
 
 出力は3つ。順番は厳守。省略できるのは2番だけ。
 
@@ -257,10 +348,11 @@ ${exampleJson}
 \`\`\`
 
 markers: 本文にそのまま現れる語に印をつける。surface は本文に実在する文字列。
-  kind は "new"（初めて会う語）／ "grammar"（今日使う文型）／ "deck"（学習者が過去にfumったデッキの語）。
+  kind は "new"（初めて会う語）／ "revisit"（今日すでに出た語を別の文でもう一度使うとき）／ "grammar"（今日使う文型）／ "deck"（学習者が過去にfumったデッキの語）。
   "new" は今日の場面が初出の語。"deck" は学習者のデッキにある語で、 本文に出てきたら必ず deck で印をつける（"new"ではない）。
+  "revisit" は上の「今日すでに出した語」のどれかを別の文で使ったとき。"new" にはしない。reading / meaning / example は必ず空文字。
   "grammar" は今日の文型がそのまま表れている語句に印をつける。${grammarPoint ? `「${grammarPoint.name}」の形が使われたとき、その語句を surface にする。` : ""}
-  ${markerHint(moment, stance, deckWords.length > 0)}
+  ${markerHint(moment, stance, deckWords.length > 0, allowance)}
 
 fumbles: 学習者の今回の一言からfumれた瞬間を報告する。一件もない時は空配列。
   - surface: 学習者の発言に実在する文字列（マーカーで囲む部分）。発言全体がfumれた時は空文字。

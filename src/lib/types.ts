@@ -7,7 +7,22 @@
  * never the truth.
  */
 
-export type MarkerKind = "new" | "fumble" | "grammar" | "deck";
+/**
+ * What a marker is pointing at.
+ *
+ * `new` and `revisit` are the same word at two moments in one session: `new` is the
+ * first time the partner has put it in front of the learner, and `revisit` is a
+ * later turn using it again in a different sentence. The split is the only thing
+ * that makes a word *trained* rather than *read* — a word met once and never again
+ * is a fact, and the app cannot tell the difference between a fact and a skill
+ * unless the second meeting is recorded as its own event. See
+ * `docs/adr/0007-new-words.md`.
+ *
+ * `deck` is separate from both: a deck word is one the learner fumbled in an
+ * earlier session, so the word is not new to them even though the scene treats
+ * it as the thing to be produced.
+ */
+export type MarkerKind = "new" | "revisit" | "fumble" | "grammar" | "deck";
 
 /**
  * An inline annotation pinned to a character range in a turn's text.
@@ -224,6 +239,76 @@ export interface FumbleDeckEntry {
   lastSeenAt: number;
 }
 
+/**
+ * One word the session has met, and where it came from.
+ *
+ * A slot is a word that was *met* — put in front of the learner by the partner
+ * and marked in the transcript. It is not a word the learner produced; the Fumble
+ * Deck is where production lives, and the two are deliberately not the same thing.
+ *
+ * `seenAgain` is the field that carries the product's actual claim. A word the
+ * partner used once is a fact the learner read. A word the partner used again
+ * later, in a different sentence, is one the learner can be honestly asked to
+ * recall at the debrief boundary — so the debrief only asks for words where this
+ * is true.
+ */
+export interface WordSlot {
+  surface: string;
+  reading: string;
+  meaning: string;
+  /** `new` is genuinely new; `deck` came off the Fumble Deck. Never mixed. */
+  kind: "new" | "deck";
+  /** Whether the partner has needed it again since, in a different sentence. */
+  seenAgain: boolean;
+}
+
+/**
+ * The session's New Word budget and how much of it is spent.
+ *
+ * A session targets ten words, and the split is the interesting part: about half
+ * are genuinely new and about half are drawn from the Fumble Deck. The deck half
+ * is the higher-value half, because a word never seen is a fact while a word that
+ * was failed and then met again under pressure is a trained skill.
+ *
+ * Ten is a target and not a quota. The ledger is derived from the turns that were
+ * actually committed, so a session that meets four words shows four filled slots
+ * and says so. A budget that reported ten regardless would be reporting the plan
+ * rather than the practice, which is the one thing this app does not do.
+ */
+export interface WordLedger {
+  /** Total words this session aims to meet. The rail draws this many slots. */
+  target: number;
+  /** How many of them are meant to be genuinely new words. */
+  newTarget: number;
+  /** How many are meant to come off the Fumble Deck. */
+  deckTarget: number;
+  /** The most distinct New Words one sprint may carry. */
+  maxPerSprint: number;
+  /** Words met so far, in the order they were first met, capped at `target`. */
+  slots: WordSlot[];
+  /** Distinct New Words met so far, counting words past the budget. */
+  newMet: number;
+  /** Distinct Deck Words met so far, counting words past the budget. */
+  deckMet: number;
+  /**
+   * Words met this session that the partner has already needed a second time, as
+   * surfaces.
+   *
+   * This is the list the debrief asks its question from, and it is deliberately
+   * *not* derived from `slots`. `slots` is the capped grid the rail draws, and a
+   * word met past the budget is absent from it while still being very much in the
+   * transcript — so resolving "was this needed again?" against the grid would
+   * report false for exactly the words an overrun produced.
+   */
+  revisited: string[];
+  /**
+   * How many words met this session have been needed a second time. Counted over
+   * every word met, not over the drawn slots, so an overrun of good behaviour does
+   * not read as nothing having happened.
+   */
+  seenAgain: number;
+}
+
 export interface Sprint {
   id: string;
   sessionId: string;
@@ -273,8 +358,19 @@ export interface Debrief {
   turnCount: number;
   /** Mean learner response time over the sprint, if it was measured at all. */
   avgResponseMs: number | null;
-  /** Distinct New Words the partner introduced in this sprint. */
-  words: Pick<Marker, "surface" | "reading" | "meaning">[];
+  /**
+   * Distinct New Words the partner introduced in this sprint, first met first.
+   *
+   * `seenAgain` says whether the session also needed the word later, in a different
+   * sentence. The debrief uses it to decide what it is allowed to claim: a word met
+   * only once is a word the learner can recognise and not retrieve, so calling its
+   * row a recall would be calling recognition something it is not.
+   */
+  words: (Pick<Marker, "surface" | "reading" | "meaning"> & {
+    /** `new` is a word introduced for the first time; `deck` came off the Fumble Deck. */
+    kind: "new" | "deck";
+    seenAgain: boolean;
+  })[];
   /** Each quiet correction the partner gave, with what it replaced. */
   corrections: { said: string; natural: string }[];
   /** Every fumble the model caught during this sprint, with the situation it happened in. */
@@ -294,6 +390,12 @@ export interface SessionState {
   fumbleDeck: FumbleDeckEntry[];
   /** Distinct natural forms the learner has fumbled so far. The "deck count". */
   fumbleDeckSize: number;
+  /**
+   * The session's New Word budget and what is spent of it, read fresh on every
+   * snapshot so a reload mid-session shows the slots the learner actually filled
+   * rather than a zeroed rail.
+   */
+  words: WordLedger;
   /** The session's furigana preference as the server holds it. */
   furiganaOn: boolean;
 }
@@ -331,6 +433,13 @@ export interface Committed {
    * the same list from the server.
    */
   fumbleDeck: FumbleDeckEntry[];
+  /**
+   * The New Word budget after this commit, with the slots this exchange filled.
+   * The rail redraws its ten slots from this, so a word met mid-stream appears
+   * without a reload and without the client keeping its own count of what it has
+   * seen — the same rule as the deck above it.
+   */
+  words: WordLedger;
 }
 
 /** Frames sent over the turn stream, in order. */

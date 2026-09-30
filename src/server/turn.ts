@@ -7,6 +7,7 @@ import {
   type ParsedReply,
 } from "./parse";
 import { readStance, type Spoken, type Stance } from "./stance";
+import { buildWordLedger, metWords, newWordAllowance, targetDeckWords } from "./words";
 import { closeSprint, sessionExpired, pacing } from "./pacing";
 import {
   commitBoundary,
@@ -29,7 +30,15 @@ import {
   type DetectedFumble,
 } from "./fumbles";
 import { fumbleMarkers } from "./fumbleMarkers";
-import type { Marker, SessionStatus, Sprint, SprintEnding, Turn, TurnEvent } from "@/lib/types";
+import type {
+  Marker,
+  SessionStatus,
+  Sprint,
+  SprintEnding,
+  Turn,
+  TurnEvent,
+  WordLedger,
+} from "@/lib/types";
 import { firstSentenceEnd } from "@/lib/sentences";
 
 /**
@@ -127,6 +136,48 @@ function earlierGoals(sprints: Sprint[], before: number): string[] {
  */
 function activeDeckWords(): string[] {
   return getFumbleDeck().map((entry) => entry.natural);
+}
+
+/**
+ * The deck words this turn is putting back in play, capped to the budget. Read
+ * fresh each call, and for the reason `targetDeckWords` gives.
+ */
+function targetedDeckWords(): string[] {
+  return targetDeckWords(activeDeckWords());
+}
+
+/**
+ * The New Word budget as it stands after whatever has just committed, for the
+ * rail. Read after the write rather than carried through the call, so a word the
+ * model marked on this turn is in the frame the client redraws from.
+ */
+function committedWords(sessionId: string): WordLedger {
+  return buildWordLedger(getTurns(sessionId), getSprints(sessionId).length);
+}
+
+/**
+ * The two New Word fields every call needs, read fresh from committed turns.
+ *
+ * Both are derived rather than carried: a counter incremented on commit would
+ * disagree with the transcript the moment a turn was reloaded, and the whole
+ * point of the ledger is that the prompt and the rail are reading the same
+ * committed turns. The cost is two reads per model call, both against a table
+ * holding one learner's session.
+ */
+function wordContext(
+  sessionId: string,
+  sprint: Sprint | null,
+  sprints: Sprint[],
+  moment: Moment,
+): Pick<PromptContext, "metWords" | "allowance"> {
+  const turns = getTurns(sessionId);
+  return {
+    // A closing line is the one moment with no room for a revisit: it is one
+    // short sign-off, and a word woven into it is a word used in the least
+    // useful sentence in the sprint.
+    metWords: moment === "closing" ? [] : metWords(turns),
+    allowance: newWordAllowance(turns, sprint, sprints),
+  };
 }
 
 /**
@@ -321,15 +372,20 @@ export async function runTurn(
           ? inSprint
           : [...inSprint, { role: "learner", text: learnerText, naturalPhrasing: null, responseMs }];
       const stance: Stance = opening ? "plain" : readStance(said).stance;
+      // Named once because the prompt's moment and the word budget's notion of the
+      // moment have to be the same one, and deriving it twice is how they stop
+      // being.
+      const moment = (opening && learnerText === null ? "opening" : "reply") as Moment;
 
       const parsed = await ask(
         {
           brief: sprint.brief,
-          moment: (opening && learnerText === null ? "opening" : "reply") as Moment,
+          moment,
           stance,
           earlier: earlierGoals(sprints, sprint.seq),
-          deckWords: activeDeckWords(),
+          deckWords: targetedDeckWords(),
           grammarPoint: session.grammarPoint,
+          ...wordContext(sessionId, sprint, sprints, moment),
         },
         inSprint,
         learnerText ?? "（学習者が来た）",
@@ -383,6 +439,7 @@ export async function runTurn(
         status: "active",
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
+        words: committedWords(sessionId),
       });
       return;
     }
@@ -404,8 +461,9 @@ export async function runTurn(
         moment: "closing",
         stance: "plain",
         earlier: earlierGoals(sprints, sprint.seq),
-        deckWords: activeDeckWords(),
+        deckWords: targetedDeckWords(),
         grammarPoint: session.grammarPoint,
+        ...wordContext(sessionId, sprint, sprints, "closing"),
       },
       history,
       line,
@@ -419,8 +477,12 @@ export async function runTurn(
             moment: "opening",
             stance: "plain",
             earlier: earlierGoals(sprints, sprint.seq + 1),
-            deckWords: activeDeckWords(),
+            deckWords: targetedDeckWords(),
             grammarPoint: session.grammarPoint,
+            // The scene is a brief, not an open sprint, so it has no words in it
+            // yet and takes the full ceiling. What it does need is the words the
+            // scenes before it met, which is what the revisit block is for.
+            ...wordContext(sessionId, null, sprints, "opening"),
           },
           [],
           "（学習者が来た）",
@@ -498,6 +560,7 @@ export async function runTurn(
       status,
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
+      words: committedWords(sessionId),
     });
 
     if (result.drillTurn) {
@@ -517,6 +580,7 @@ export async function runTurn(
         status,
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
+        words: committedWords(sessionId),
       });
     }
 
@@ -531,6 +595,7 @@ export async function runTurn(
         status,
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
+        words: committedWords(sessionId),
       });
     }
   } catch (err) {
@@ -635,6 +700,7 @@ async function handleDrillResponse(
       status: "ended",
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
+      words: committedWords(sessionId),
     });
     void drilled;
     return;
@@ -713,8 +779,14 @@ async function handleDrillResponse(
         moment: isSprintEnd ? "opening" : "reply",
         stance: "plain",
         earlier,
-        deckWords: activeDeckWords(),
+        deckWords: targetedDeckWords(),
         grammarPoint: getSession(sessionId)?.grammarPoint ?? null,
+        ...wordContext(
+          sessionId,
+          targetSprint,
+          sprints,
+          isSprintEnd ? "opening" : "reply",
+        ),
       },
       sprintTurns,
       learnerLine,
@@ -743,6 +815,7 @@ async function handleDrillResponse(
       status: "active",
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
+      words: committedWords(sessionId),
     });
     void drilled;
   } catch (err) {
