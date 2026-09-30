@@ -72,6 +72,31 @@ quality trade and not a settled question. `npm run probe:model` re-runs the comp
 - **If a non-reasoning model with better Japanese becomes available, re-run the probe and
   switch.** Nothing in the architecture depends on which model is used.
 
+## Update: 2026-09-30
+
+The decision stands — this is still the only available model that fits the budget — but
+driving a real session turned up two more things about it, and one of them was invisible
+for a long time.
+
+- **It sometimes returns a reply with no prose at all.** The two-part output contract —
+  the partner's line, then an optional `修正: ` line — occasionally comes back with only
+  the second part, so the learner would be shown a correction and nothing to read. Measured
+  at **2 of 7 calls** before the contract was made explicit. This is the same failure shape
+  as the `{"natural": ""}` copying above: asked for two things, it does one. Saying that
+  the reply line is mandatory and only the correction may be omitted took it to **0 of 7**,
+  but it is a property of the model, not of the wording, so it belongs here.
+- **Closing a scene is the moment it gets most wrong.** Told to wrap up, it ends on a
+  question — and a question at the end of a scene is a turn the learner never gets to
+  answer, because the debrief is already on screen and the next scene has begun. Each
+  scene now carries its own closing line as the worked example, for the same reason it
+  already carries its own opening and correction: a small model follows a demonstrated
+  shape and ignores a described one.
+- **The latency numbers above were re-measured and are worse than 0.8–1.6s.** Median
+  0.95–1.38s against the 0.9s target, with large run-to-run variance: two probe runs
+  differing by one line of prompt gave medians of 1375ms and 950ms. The prompt grew from
+  roughly 600 to 740–936 characters, which is real but is not the cause. Deciding what to
+  hold the first sentence to is issue #12; the numbers are on it.
+
 ## Rejected
 
 - **`MiniMax-M2.7-highspeed`** as the default. Better at the job, 3–4x over budget on the

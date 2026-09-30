@@ -107,7 +107,7 @@ function trend(times: number[]): string | null {
 }
 
 const ENDING_WORDS: Record<SprintEnding, string> = {
-  budget: "ran its full length",
+  "turn-cap": "was cut short by the turn cap — this learner was moving fast",
   "sprint-clock": "stopped on time",
   "session-clock": "stopped because the session was out of time",
   abandoned: "stopped here, by you",

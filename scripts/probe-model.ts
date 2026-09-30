@@ -6,7 +6,10 @@ import { IZAKAYA, TRAIN } from "@/server/scenarios";
 import { firstSentenceEnd } from "@/lib/sentences";
 import { FIRST_SENTENCE_BUDGET_MS } from "@/lib/measure";
 import { loadSettings } from "./settings";
+import { looksJapanese } from "@/lib/reply";
 import { performance } from "node:perf_hooks";
+
+loadSettings();
 
 /**
  * Drive the production prompt against a real model and print what the latency
@@ -18,10 +21,9 @@ import { performance } from "node:perf_hooks";
  * turn, so the first sentence is the thing to watch.
  */
 
-loadSettings();
-
 const IZAKAYA_OPENING = IZAKAYA.sprints[0]!;
 const STATION = TRAIN.sprints[0]!;
+const TICKET = TRAIN.sprints[3]!;
 
 /**
  * The exchange so far, so each stance is derived from real learner turns rather
@@ -45,13 +47,30 @@ let closingsAsking = 0;
 let closingCount = 0;
 const firstSentences: number[] = [];
 
+/** Enough to say something about a rate. One closing is an anecdote. */
+const CLOSING_SAMPLES = 3;
+
+/**
+ * A brisk but unremarkable answer time, so the `harder` stance — which needs two
+ * quick, uncorrected answers before it fires — is reachable from what a learner
+ * actually writes rather than from a number chosen to trip it.
+ */
+const BRISK_MS = 12_000;
+
 function saidUpTo(learner: string | null) {
   if (learner === null) return SAID;
-  return [...SAID, { role: "learner" as const, text: learner, naturalPhrasing: null, responseMs: 12_000 }];
+  return [
+    ...SAID,
+    { role: "learner" as const, text: learner, naturalPhrasing: null, responseMs: BRISK_MS },
+  ];
 }
 
 async function ask(brief: typeof IZAKAYA_OPENING, moment: Moment, learner: string | null) {
-  const stance: Stance = learner === null ? "plain" : readStance(saidUpTo(learner)).stance;
+  // A closing is always `plain` in the app — a scene ending is not a moment to
+  // complicate or rescue — so deriving a stance here would measure a switch the
+  // product never uses, and print it as if it had.
+  const stance: Stance =
+    moment === "closing" || learner === null ? "plain" : readStance(saidUpTo(learner)).stance;
   const system = buildSystemPrompt({
     brief,
     moment,
@@ -91,7 +110,9 @@ async function ask(brief: typeof IZAKAYA_OPENING, moment: Moment, learner: strin
     `  prompt=${system.length} chars  first_sentence=${first.toFixed(0)}ms  total=${(performance.now() - t0).toFixed(0)}ms`,
   );
   calls++;
-  if (!prose.trim()) blank++;
+  // The same test the app uses to decide whether to retry, so this rate is the
+  // rate the app experiences rather than a stricter one.
+  if (!looksJapanese(prose)) blank++;
   else firstSentences.push(first);
 
   if (moment === "closing") {
@@ -111,13 +132,16 @@ async function ask(brief: typeof IZAKAYA_OPENING, moment: Moment, learner: strin
 console.log(`model: ${process.env.MINIMAX_MODEL || "abab6.5s-chat"}`);
 
 /**
- * Four cases that between them reach every stance, plus the two other moments.
+ * Four exchanges that between them reach every stance, plus all three moments.
  *
  * The stances are reached by what the learner writes, because that is how the app
  * reaches them: a long easy answer pairs with a long easy answer and the next
- * reply is `harder`, a garbled one is `slow`, and asking what a word is
+ * reply is `harder`, a hesitant one is `slow`, and asking what a word is
  * `give-word`. A probe that forced the stance by argument would be measuring a
  * switch the product never uses.
+ *
+ * Three scenes, three closings. One closing is an anecdote, and the closing is the
+ * moment this prompt had to fix, so it is the number that most needs a sample.
  */
 await ask(IZAKAYA_OPENING, "opening", null);
 await ask(IZAKAYA_OPENING, "reply", "ビールを一つお願いします。");
@@ -128,14 +152,24 @@ await ask(IZAKAYA_OPENING, "closing", "締めを雑炊でお願いします。")
 SAID.length = 0;
 await ask(STATION, "opening", null);
 await ask(STATION, "reply", "すみません、分からなくて。"); // -> slow
+await ask(STATION, "closing", "いつ再開するか、まだ分かりません。");
+
+SAID.length = 0;
+await ask(TICKET, "opening", null);
+await ask(TICKET, "reply", "有効期限はいつまでですか。");
+await ask(TICKET, "closing", "じゃ、それでお願いします。");
 
 const sorted = [...firstSentences].sort((a, b) => a - b);
 const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+
+console.log(`\n${calls} calls.`);
 console.log(
-  `\n${calls} calls, ${blank} with no prose (${Math.round((blank / calls) * 100)}% would retry)`,
+  `replies the app would retry (no usable prose): ${blank}/${calls}` +
+    (blank > 0 ? " — the prompt is losing the output contract again" : ""),
 );
 console.log(
-  `closings that ended on a question: ${closingsAsking}/${closingCount}`,
+  `closings that ended on a question: ${closingsAsking} of ${closingCount}` +
+    (closingCount < CLOSING_SAMPLES ? " — too few to mean much" : ""),
 );
 console.log(
   `first sentence: median ${median.toFixed(0)}ms, min ${sorted[0]?.toFixed(0) ?? "-"}ms, ` +

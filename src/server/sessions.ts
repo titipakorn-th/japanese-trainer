@@ -28,7 +28,7 @@ import type {
  */
 
 const ENDINGS: ReadonlySet<string> = new Set<SprintEnding>([
-  "budget",
+  "turn-cap",
   "sprint-clock",
   "session-clock",
   "abandoned",

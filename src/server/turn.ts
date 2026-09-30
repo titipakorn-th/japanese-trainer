@@ -39,6 +39,7 @@ import type {
   WordLedger,
 } from "@/lib/types";
 import { firstSentenceEnd } from "@/lib/sentences";
+import { looksJapanese } from "@/lib/reply";
 
 /**
  * One turn, end to end: prompt, stream, parse, commit — or fail having written
@@ -93,22 +94,6 @@ function cleanResponseMs(raw: unknown): number | null {
   // measurement in a number the product reports to the learner.
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > MAX_RESPONSE_MS) return null;
   return Math.round(raw);
-}
-
-/**
- * A reply with no Japanese in it is not a reply. Cheap to check, and it stops the
- * learner being shown an English paragraph in the middle of a conversation.
- * One third is loose on purpose: a reply with a stray English word in it is still
- * a reply, and a threshold high enough to catch that would start rejecting
- * correct Japanese.
- */
-const JAPANESE_SHARE = 1 / 3;
-
-function looksJapanese(text: string): boolean {
-  const chars = text.replace(/\s/g, "");
-  if (chars.length === 0) return false;
-  const japanese = chars.match(/[぀-ヿ一-鿿]/g)?.length ?? 0;
-  return japanese / chars.length > JAPANESE_SHARE;
 }
 
 /** The next sprint in the plan, or null when this one was the last. */

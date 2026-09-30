@@ -144,7 +144,7 @@ export const WORK: Scenario = {
       goal: "遅れた理由を説明して、立て直しかたの了承を得る",
       openingLine: "昨日の分は遅れませんか。",
       correctionLine: "遅れの原因を確認します。",
-      closingLine: "立て直します。部長、ありがとうございます。",
+      closingLine: "立て直します。明日中に報告します。",
       word: {
         surface: "遅れ",
         reading: "おくれ",
@@ -192,7 +192,7 @@ export const WORK: Scenario = {
       goal: "残業の理由と残り時間を伝えて、了承をもらう",
       openingLine: "今日は残業になりますか。",
       correctionLine: "残りの仕事を片づけて出ます。",
-      closingLine: "残りを見たら出ますね。",
+      closingLine: "じゃ、今日はこれで終わりにしましょう。",
       word: {
         surface: "残業",
         reading: "ざんぎょう",
@@ -264,7 +264,7 @@ export const TRAIN: Scenario = {
       goal: "定期券の有効期限と、使える区間を聞き出す",
       openingLine: "定期券ですね。どなたの分ですか。",
       correctionLine: "有効期限は今月末です。",
-      closingLine: "じゃ、一枚お願いします。",
+      closingLine: "有効期限が分かりました。ごゆっくり。",
       word: {
         surface: "定期券",
         reading: "ていきけん",
@@ -280,7 +280,7 @@ export const TRAIN: Scenario = {
       goal: "落とし物の手続きと、手数料いくらになるのかを聞き出す",
       openingLine: "落とし物ですか。手数料は三百円です。",
       correctionLine: "手数料は三百円です。",
-      closingLine: "では、手続きをお願いします。",
+      closingLine: "手続きの窓口はここです。",
       word: {
         surface: "手数料",
         reading: "てちょう",

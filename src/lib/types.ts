@@ -189,7 +189,7 @@ export interface Scenario {
  * `migrated` is the one reason that is not a decision: it is how a session
  * recorded before sprints existed is given a sprint to hang its turns on.
  */
-export type SprintEnding = "budget" | "sprint-clock" | "session-clock" | "abandoned" | "migrated";
+export type SprintEnding = "turn-cap" | "sprint-clock" | "session-clock" | "abandoned" | "migrated";
 
 /**
  * Why a particular moment counts as a fumble.

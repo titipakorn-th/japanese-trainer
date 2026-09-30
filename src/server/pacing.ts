@@ -45,13 +45,17 @@ export function pacing(): Pacing {
   };
 }
 
-/** Sprints to a session, clamped to the 4–6 the spec asks for and to what the family has. */
+/**
+ * Sprints to a session, held inside the 4–6 the spec promises.
+ *
+ * The floor is the spec's, not a preference: CONTEXT.md defines a session as 4–6
+ * sprints, and a three-sprint session breaks that promise silently. A family with
+ * fewer than four scenes therefore repeats one, which is why every family ships
+ * five — the clamp is a backstop against a thin catalog, not a way to plan one.
+ */
 export function sprintsPerSession(available: number): number {
   const asked = Math.round(envNum(process.env.SPRINTS_PER_SESSION, 5));
-  // Never below one, because a session with no sprint has nothing to play. Not
-  // floored at four: a family with three scenes would have to repeat one, and a
-  // repeated scene is worse than a session of three.
-  return Math.max(1, Math.min(6, Math.min(asked, available)));
+  return Math.max(1, Math.min(6, Math.max(4, Math.min(asked, available))));
 }
 
 export interface Closing {
@@ -82,7 +86,7 @@ export function closeSprint(
   p: Pacing,
 ): Closing {
   if (now - startedAt >= p.sprintMs) return { endedBy: "sprint-clock" };
-  if (learnerTurns >= p.sprintTurns) return { endedBy: "budget" };
+  if (learnerTurns >= p.sprintTurns) return { endedBy: "turn-cap" };
   return { endedBy: null };
 }
 
