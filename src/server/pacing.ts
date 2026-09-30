@@ -18,8 +18,9 @@ import type { Pacing, SprintEnding } from "@/lib/types";
  * app runs in the background, and a session that quietly ends while nobody is
  * looking is worse than one that ends the moment the learner next speaks.
  *
- * Defaults land on the spec's shape: 8 learner turns per sprint, a 6-minute
- * sprint, a 30-minute session, and 4–6 sprints to a session.
+ * Defaults land on the spec's shape: a 6-minute sprint, five of them, and a
+ * 30-minute session. The turn count is a cap on a very brisk exchange, not the
+ * thing that ends a scene — see `closeSprint`.
  */
 
 const MINUTE = 60_000;
@@ -31,16 +32,19 @@ function num(raw: string | undefined, fallback: number): number {
 
 export function pacing(): Pacing {
   return {
-    sprintTurns: Math.round(num(process.env.SPRINT_TURNS, 8)),
+    sprintTurns: Math.round(num(process.env.SPRINT_TURNS, 20)),
     sprintMs: num(process.env.SPRINT_MS, 6 * MINUTE),
     sessionMs: num(process.env.SESSION_MS, 30 * MINUTE),
   };
 }
 
-/** Sprints to a session, clamped to the 4–6 the spec asks for. */
+/** Sprints to a session, clamped to the 4–6 the spec asks for and to what the family has. */
 export function sprintsPerSession(available: number): number {
   const asked = Math.round(num(process.env.SPRINTS_PER_SESSION, 5));
-  return Math.max(1, Math.min(6, Math.max(4, Math.min(asked, available))));
+  // Never below one, because a session with no sprint has nothing to play. Not
+  // floored at four: a family with three scenes would have to repeat one, and a
+  // repeated scene is worse than a session of three.
+  return Math.max(1, Math.min(6, Math.min(asked, available)));
 }
 
 export interface Closing {
@@ -51,10 +55,18 @@ export interface Closing {
 /**
  * Whether this request is the sprint's last, and why.
  *
- * `learnerTurns` counts what is already committed. The budget closes the sprint
- * when it is spent, so the submission that spends it still gets answered — by
- * the partner's closing line rather than by a fresh question. Ending a scene on
- * a question the learner never gets to answer is the same as losing a turn.
+ * The clock is checked first, because it is the one that actually decides how long
+ * a session lasts. A turn budget cannot: the learner sets the pace, so eight turns
+ * is two and a half minutes for a fast learner and seven for a slow one, and a
+ * five-sprint session built on it lands anywhere between twelve and forty minutes.
+ * The clock is the same six minutes for everyone, so the count is a *cap* — it
+ * exists to stop a brisk exchange from running to twenty-five turns inside one
+ * scene, and it is the reason `SPRINT_TURNS` is twenty rather than eight.
+ *
+ * `learnerTurns` counts what is already committed. The cap closes the sprint when
+ * it is reached, so the submission that reaches it still gets answered — by the
+ * partner's closing line rather than by a fresh question. Ending a scene on a
+ * question the learner never gets to answer is the same as losing a turn.
  */
 export function closeSprint(
   learnerTurns: number,
@@ -62,8 +74,8 @@ export function closeSprint(
   now: number,
   p: Pacing,
 ): Closing {
-  if (learnerTurns >= p.sprintTurns) return { endedBy: "budget" };
   if (now - startedAt >= p.sprintMs) return { endedBy: "sprint-clock" };
+  if (learnerTurns >= p.sprintTurns) return { endedBy: "budget" };
   return { endedBy: null };
 }
 

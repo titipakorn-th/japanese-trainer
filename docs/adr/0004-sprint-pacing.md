@@ -1,4 +1,4 @@
-# 4. Sprints end on a turn budget, and the clock is a backstop
+# 4. Sprints end on a clock, and a turn count caps them
 
 Date: 2026-09-30
 Status: accepted
@@ -20,16 +20,21 @@ a request is in flight, so nothing can end a session while nobody is looking.
 
 ## Decision
 
-**A sprint ends on a budget of learner turns. A clock backstops both the sprint and
-the session. Neither is a background job — both are checked when a turn is
-requested.**
+**A sprint ends on a clock. A turn count caps it. Neither is a background job —
+both are checked when a turn is requested.**
 
-`SPRINT_TURNS` (8) is the primary terminator, because it is the only one that
-actually bounds the work: a slow learner gets a shorter session, and a brisk one
-gets a longer sprint with more in it. `SPRINT_MS` (6 min) and `SESSION_MS` (30
-min) catch the cases a budget cannot see — one very slow turn, a learner who
-closes the tab — and the session clock outranks the plan, so a session past its
-window ends on the spot rather than opening a scene it has no time for.
+`SPRINT_MS` (6 min) is the terminator, and it is the only one that can be. The
+learner sets the pace by reading and typing, so the same eight turns is two and a
+half minutes for a fast learner and seven for a slow one, and a five-sprint
+session built on a turn count lands anywhere between twelve and forty minutes. A
+clock is six minutes for everyone, which is what makes "4–6 sprints, roughly half
+an hour" a promise the app can actually keep. `SESSION_MS` (30 min) outranks the
+plan: a session past its window ends on the spot rather than opening a scene it
+has no time for.
+
+`SPRINT_TURNS` (20) is a cap, and it is there for one reason — to stop a brisk
+exchange from running to twenty-five turns inside a single scene. It is not what
+decides how long anyone's practice is, which is why it is twenty and not eight.
 
 Two details that only showed up once the thing ran:
 
@@ -44,12 +49,16 @@ Two details that only showed up once the thing ran:
 
 ## Consequences
 
-- **A brisk learner finishes early.** At 18 seconds a turn a five-sprint session is
-  about twelve minutes, not thirty. The alternative is padding the session with
-  turns the learner did not need, and a session that reports 30 minutes because the
-  app kept it open for 30 minutes is the exact dishonesty this product is trying to
-  avoid. The debrief and the end-of-session panel report the real numbers, and the
-  track shows how many sprints are left.
+- **A sprint's turn count varies with the learner, from about four to twenty.**
+  That is the point: the thing being held constant is the six minutes, and the
+  number of exchanges inside it is a fact about the learner rather than a setting.
+  The debrief reports what actually happened, and the "average answer time" and the
+  first-half/second-half trend on it are more meaningful over twenty turns than over
+  eight.
+- **The cap can still end a session early.** Getting through twenty turns inside six
+  minutes means under eighteen seconds a turn including the model's own reply, and
+  the debrief will say the sprint "ran its full length" — meaning the cap, which is
+  what ended it. The end-of-session panel reports the real totals either way.
 - **An idle session does not end until the learner next speaks.** A session that
   sits at minute 25 unanswered is still resumable at minute 40, and its next sprint
   will be closed by the session clock with a debrief that says so. Ending it in the
@@ -60,17 +69,18 @@ Two details that only showed up once the thing ran:
   40分くらい") next to the measured answer time, and leaves the reader to see that
   the two disagree. There is no honest way to measure practice time from a store
   that only knows when turns were written.
-- **The default turn budget is a guess until it is measured against real sessions.**
-  Eight turns is the figure that makes 8 × ~40s land near the spec's 5–7 minute
-  sprint, not a figure anyone has watched a learner hit. Re-tune `SPRINT_TURNS`
-  against real sessions, and read the debrief's average answer time to do it.
+- **Six minutes a sprint is a guess until it is measured against real sessions.**
+  Nothing has watched a learner sit in one, and the first real session that does
+  should be read for how the debrief's duration compares to the six minutes the
+  clock charged. If learners are consistently getting cut mid-thought, the fix is a
+  longer `SPRINT_MS` and a shorter session, not a bigger turn cap.
 
 ## Rejected
 
-- **Making the sprint a pure wall clock** (keep going until 6 minutes are up, cap at
-  N turns). This makes a brisk learner's sprint a twenty-turn ramble and a slow
-  learner's sprint three turns, which is the opposite of the same trade — and it
-  makes the sprint's length depend on a number the app cannot control.
+- **Ending the sprint on a fixed turn count**, which is what this decision was
+  originally written as. It holds a number steady and lets the wall clock drift,
+  which is backwards: the spec promises half an hour of practice, and only the clock
+  can keep that promise for a learner whose speed is not known in advance.
 - **A background timer that ends idle sessions.** Needs a sweeper in a process that
   is otherwise request-scoped, and it changes a session's state while the learner is
   looking at it.

@@ -100,6 +100,8 @@ export function useTurn(sessionId: string) {
         const committed: Committed[] = [];
         /** What has been streamed for the line being read right now. */
         let shown = "";
+        /** Whether the server already said what went wrong, in its own words. */
+        let reported = false;
 
         for (;;) {
           const { done, value } = await reader.read();
@@ -152,6 +154,7 @@ export function useTurn(sessionId: string) {
               setStream((prev) => ({ ...prev, text: "" }));
               readyAt.current = performance.now();
             } else if (event.t === "error") {
+              reported = true;
               setStream({
                 phase: "failed",
                 text: "",
@@ -165,11 +168,17 @@ export function useTurn(sessionId: string) {
           setStream((prev) => ({ ...prev, phase: "idle" }));
           return result;
         }
-        // The stream ended without committing anything: the server hung up, the
-        // connection dropped mid-turn, or the request was abandoned. Nothing was
-        // written, so the transcript is already right — but the turn has to settle
-        // here, because leaving the phase at "streaming" disables the composer for
-        // good and strands a half-written line on screen with no way to clear it.
+        // The stream ended without committing anything and without saying why: the
+        // server hung up, the connection dropped mid-turn, or the request was
+        // abandoned. Nothing was written, so the transcript is already right — but
+        // the turn has to settle here, because leaving the phase at "streaming"
+        // disables the composer for good and strands a half-written line on screen
+        // with no way to clear it.
+        //
+        // Only when the server said nothing. Its own message is more useful than
+        // this one — a timeout that says how many seconds it waited is worth more
+        // than a generic note that something stopped.
+        if (reported) return NOT_SENT;
         return fail("The partner's reply was cut off before it finished.");
       } catch (err) {
         if (controller.signal.aborted) {

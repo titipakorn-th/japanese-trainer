@@ -86,6 +86,16 @@ export interface SprintBrief {
   openingLine: string;
   /** A quiet correction that would make sense in this scene. */
   correctionLine: string;
+  /**
+   * The partner's sign-off, in this voice, in this place.
+   *
+   * Its own string because the closing is the one moment the model reliably gets
+   * wrong: handed only an instruction to wrap up, it asks one more question. The
+   * learner is never going to answer it — the debrief card is already on screen
+   * and the next scene has begun — so a question there is a turn thrown away, and
+   * it is thrown away at the exact moment the app is asking for attention.
+   */
+  closingLine: string;
   /** The New Word this scene introduces. */
   word: WordSeed;
 }

@@ -66,7 +66,7 @@ export type Moment = "opening" | "reply" | "closing";
 const MOMENT_LINES: Record<Moment, string> = {
   opening: "学習者はまだ何も言っていない。この場面の最初の一言。挨拶か、場面から入ること。",
   reply: "",
-  closing: "ここで場面を終える。最後の一言だけまとめる。質問は増やさない。",
+  closing: "ここで場面を終える。質問は書かない。答えも聞かない。最後の一言だけで、この場面が終わったことを示す。",
 };
 
 const GREETING_LINES: Record<Moment, string> = {
@@ -74,9 +74,6 @@ const GREETING_LINES: Record<Moment, string> = {
   reply: "最初の挨拶を繰り返さない。学習者はすでにこの場面の中にいる。",
   closing: "最初の挨拶を繰り返さない。",
 };
-
-/** A closing that belongs to any scene, for the one moment with no scene line. */
-const NEUTRAL_CLOSING = "では、よろしくお願いします。";
 
 export interface PromptContext {
   brief: SprintBrief;
@@ -91,7 +88,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const { brief, moment, stance, earlier } = ctx;
   const { word } = brief;
 
-  const example = moment === "closing" ? NEUTRAL_CLOSING : brief.openingLine;
+  const example = moment === "closing" ? brief.closingLine : brief.openingLine;
   const correctionExample = moment === "reply" ? `修正: ${brief.correctionLine}` : "";
   const markers =
     moment === "closing"
@@ -126,11 +123,12 @@ ${GREETING_LINES[moment]}
 - この場面から出ない。目的から外れない。前の場面の話に戻らない。
 - 語彙はN4を少し超えたくらいまで。
 
-出力は3つ。順番は厳守。
+出力は3つ。順番は厳守。省略できるのは2番だけ。
 
-1. 日本語の返答を1〜2文。
+1. 日本語の返答を1〜2文。必ず1番目に書く。空にしない。日本語の返答がないまま2番に進まない。
 2. 学習者の言い方が不自然なときだけ、「修正: 」で始まる行を1行。
    説明や括弧は書かず、そのまま使える一文だけ。${brief.persona}の声のまま。
+   この行は「返答」ではない。1番の後に置く。
    おかしくなければこの行は書かない。
 3. fenced jsonをちょうど1つ。
 

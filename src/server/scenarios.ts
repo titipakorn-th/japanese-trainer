@@ -40,6 +40,7 @@ export const IZAKAYA: Scenario = {
       goal: "飲み物と肴を二品注文して、飲み物は何にするか決める",
       openingLine: "いらっしゃいませ。お通し、いただきますか。",
       correctionLine: "ビールを一本、お願いします。",
+      closingLine: "かしこまりました。お会計は後で大丈夫です。",
       word: {
         surface: "お通し",
         reading: "お通し",
@@ -55,6 +56,7 @@ export const IZAKAYA: Scenario = {
       goal: "焼き鳥を五本注文して、辛さとタレを決める",
       openingLine: "焼き鳥は五本です。タレはどうします。",
       correctionLine: "焼き鳥を五本、お願いします。",
+      closingLine: "焼き鳥はお願いしておきます。",
       word: {
         surface: "タレ",
         reading: "たれ",
@@ -70,6 +72,7 @@ export const IZAKAYA: Scenario = {
       goal: "肴をさらに一品追加して、量を調整する",
       openingLine: "もう一品、何になさいますか。",
       correctionLine: "追加で一品、お願いします。",
+      closingLine: "追加はここまでで。",
       word: {
         surface: "一品",
         reading: "いっぴん",
@@ -85,6 +88,7 @@ export const IZAKAYA: Scenario = {
       goal: "締めを注文して、飲み物も最後の一杯にする",
       openingLine: "締めは雑炊とご飯、どちらになさいますか。",
       correctionLine: "締めを雑炊で、お願いします。",
+      closingLine: "締めは決まりですね。",
       word: {
         surface: "雑炊",
         reading: "ぞうすい",
@@ -100,6 +104,7 @@ export const IZAKAYA: Scenario = {
       goal: "会計を済ませて、領収書を受け取る",
       openingLine: "お会計は五千八百円です。領収書をお願いします。",
       correctionLine: "カードでお支払いします。",
+      closingLine: "ありがとうございました。おやすみなさい。",
       word: {
         surface: "領収書",
         reading: "りょうしゅうしょ",
@@ -123,6 +128,7 @@ export const WORK: Scenario = {
       goal: "今日の作業の順番を確認して、最初の一件を始める",
       openingLine: "お疲れ様です。始業は九時ですよね。",
       correctionLine: "昨日の続きから始めます。",
+      closingLine: "じゃあ、最初の一件から始めましょう。",
       word: {
         surface: "始業",
         reading: "しぎょう",
@@ -138,6 +144,7 @@ export const WORK: Scenario = {
       goal: "遅れた理由を説明して、立て直しかたの了承を得る",
       openingLine: "昨日の分は遅れませんか。",
       correctionLine: "遅れの原因を確認します。",
+      closingLine: "立て直します。部長、ありがとうございます。",
       word: {
         surface: "遅れ",
         reading: "おくれ",
@@ -153,6 +160,7 @@ export const WORK: Scenario = {
       goal: "資料の修正点を一つ出して、それが通るまで話を進める",
       openingLine: "資料の修正点、ありますか。",
       correctionLine: "修正点は二つあります。",
+      closingLine: "では、その二点で進めましょう。",
       word: {
         surface: "修正点",
         reading: "しゅうせいてん",
@@ -168,6 +176,7 @@ export const WORK: Scenario = {
       goal: "電話の用件と期限を聞き取って、あとで部長に伝える",
       openingLine: "取引先から電話です。期限、何でしたっけ。",
       correctionLine: "用件と期限を聞きます。",
+      closingLine: "用件と期限、メモしました。",
       word: {
         surface: "期限",
         reading: "きげん",
@@ -183,6 +192,7 @@ export const WORK: Scenario = {
       goal: "残業の理由と残り時間を伝えて、了承をもらう",
       openingLine: "今日は残業になりますか。",
       correctionLine: "残りの仕事を片づけて出ます。",
+      closingLine: "残りを見たら出ますね。",
       word: {
         surface: "残業",
         reading: "ざんぎょう",
@@ -206,6 +216,7 @@ export const TRAIN: Scenario = {
       goal: "運転が再開する大体の時間と、遅れの長さを聞く",
       openingLine: "運転を見合わせています。ご不便をおかけします。",
       correctionLine: "運転再開の時間を教えてください。",
+      closingLine: "遅れていてすみません。",
       word: {
         surface: "見合わせ",
         reading: "みあわせ",
@@ -221,6 +232,7 @@ export const TRAIN: Scenario = {
       goal: "乗り換えのルートと、必要な時間の目安を聞き出す",
       openingLine: "乗り換えのルート、一緒に探しましょう。",
       correctionLine: "乗り換えの時間を教えてください。",
+      closingLine: "行き方が決まりましたね。",
       word: {
         surface: "乗り換え",
         reading: "のりかえ",
@@ -236,6 +248,7 @@ export const TRAIN: Scenario = {
       goal: "出口の場所と、目的地までの所要時間を確かめる",
       openingLine: "出口は東口です。歩いて五分です。",
       correctionLine: "東口までは歩いて五分です。",
+      closingLine: "では、東口へ。",
       word: {
         surface: "出口",
         reading: "でぐち",
@@ -251,6 +264,7 @@ export const TRAIN: Scenario = {
       goal: "定期券の有効期限と、使える区間を聞き出す",
       openingLine: "定期券ですね。どなたの分ですか。",
       correctionLine: "有効期限は今月末です。",
+      closingLine: "じゃ、一枚お願いします。",
       word: {
         surface: "定期券",
         reading: "ていきけん",
@@ -266,6 +280,7 @@ export const TRAIN: Scenario = {
       goal: "落とし物の手続きと、手数料いくらになるのかを聞き出す",
       openingLine: "落とし物ですか。手数料は三百円です。",
       correctionLine: "手数料は三百円です。",
+      closingLine: "では、手続きをお願いします。",
       word: {
         surface: "手数料",
         reading: "てちょう",
