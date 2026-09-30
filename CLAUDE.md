@@ -12,7 +12,7 @@ npm install
 npm run dev                  # http://localhost:3000
 ```
 
-Other scripts: `npm run typecheck`, `npm run build`, `npm start`,
+Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm start`,
 `npm run probe:model` — which streams real replies through the production prompt
 and prints first-sentence timings, so the latency budget can be re-checked against
 whatever models are available (see `docs/adr/0001-conversation-partner-model.md`) —
@@ -20,7 +20,16 @@ whatever models are available (see `docs/adr/0001-conversation-partner-model.md`
 service and prints cold/warm timings, the MP3 header, the timed-word count and the
 billable characters. See `docs/adr/0007-partner-speech.md` — and
 `npm run probe:migrate` — which races a dozen cold starts against one fresh store and
-checks the schema they leave. See `docs/adr/0009-cold-start-migration.md`.
+checks the schema they leave. See `docs/adr/0009-cold-start-migration.md` — and
+`npm run probe:cold-start`, which walks the path from tapping Start to a
+readable first line against a running server and prints the breakdown against the
+ten-second budget. Point it at a throwaway store so probing does not litter the
+learner's history:
+
+```sh
+DATABASE_FILE=probe.db npm start &
+npm run probe:cold-start
+```
 
 Point `MOCK_MODEL_URL` at a local endpoint to exercise the model failure and
 timeout paths without spending a model call. `MOCK_TTS_URL` does the same for the
@@ -32,6 +41,40 @@ The server owns a session. The client renders a projection of it and is never th
 source of truth, so a reload resumes and a failed model call cannot lose the thread.
 A learner's turn and the partner's reply commit in one transaction, or not at all.
 See `docs/adr/0003-turn-atomicity.md`.
+
+Anything the learner reads *about* a session is a projection of committed state
+rather than a second read. The end-of-session summary is a pure function in
+`src/lib/summary.ts` over the turns, sprints and fumbles the client already has,
+so a live session ending and a reload of a finished one produce the same account
+by the same code — see `docs/adr/0007-session-summary-projection.md`. If you find
+yourself wanting a `/summary` endpoint, that is the decision being re-litigated.
+
+## Never cache a conversation
+
+The service worker exists so the app can be installed to a home screen. It caches
+build output and nothing else: `/api/*` and `/session/*` are live server state
+and are never served from a cache, and navigations are network-first with an
+offline notice as the only fallback. A cached transcript is a screenshot of a
+conversation rather than the conversation, and the learner cannot tell the
+difference. See `docs/adr/0008-pwa-installability.md`.
+
+## Measured numbers are claims with expiry
+
+Two budgets in this app are written down, and neither stays true on its own:
+first-sentence latency (900ms, ADR 0001) and cold start (10s, issue #11). Both
+have a probe. Re-run the relevant one when the prompt, the model, the catalog, or
+the route tree changes — a budget nobody measures is a budget that has quietly
+stopped being true.
+
+## The summary must not flatter the learner
+
+`src/lib/summary.ts` is the one screen a learner is most likely to believe, so its
+tests are mostly about what it refuses to say: a trend needs four measured turns
+*and* a two-second gap, an unmeasured turn stays visible but out of every average,
+and a walk-away is a ratio only once the sample can carry one. Those two
+thresholds are copied from the debrief's `trend()` on purpose, so the sprint card
+and the session summary cannot disagree about whether a learner sped up. If you
+relax one, change both, and say why in the commit.
 
 ## Detection prompts are silent-regression hazards
 

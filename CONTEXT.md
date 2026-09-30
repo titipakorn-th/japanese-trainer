@@ -22,6 +22,15 @@ Use these terms exactly. They are the load-bearing concepts of the product.
 - **Debrief** — the short account of what happened in a sprint, written from the
   committed turns alone and shown in the transcript as the sprint ends. It
   reports measurements, never an opinion of the learner.
+- **Session summary** — the account of the whole sitting, shown when a session
+  ends and still there on every reload of it. Where a Debrief is one scene of a
+  few minutes, the summary is the run of them: the learner's response time turn
+  by turn rather than as one average, how often they walked away from a turn, and
+  what became of the words they fumbled. It reports the shape of the session
+  because the shape is the thing that changes with practice. Like a Debrief, it
+  is counted from committed turns and never an opinion — and where the evidence
+  is too thin to mean anything it says nothing rather than rounding a guess into
+  a conclusion.
 - **Fumble** — a moment the learner failed to produce the right word or form:
   an abandoned turn, a phrase compressed past naturalness, hedging around a
   word they clearly wanted, or a form a native speaker wouldn't use.
@@ -59,6 +68,7 @@ Use these terms exactly. They are the load-bearing concepts of the product.
 - A **Session** contains several **Sprints**.
 - A **Sprint** is a sequence of **Turns**.
 - A **Sprint** ends with a **Debrief**.
+- A **Session** ends with a **Session summary**.
 - A **Turn** happens under exactly one **Stance**.
 - A **Turn** can produce zero or more **Fumbles**.
 - A **Fumble** adds a word to the **Fumble Deck**.

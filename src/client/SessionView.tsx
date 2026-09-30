@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnnotatedText } from "./AnnotatedText";
 import { DebriefCard } from "./DebriefCard";
+import { SessionSummaryCard } from "./SessionSummaryCard";
 import { SprintTrack } from "./SprintTrack";
 import { SpeakButton } from "./SpeakButton";
 import { StreamedText } from "./StreamedText";
 import { useTurn } from "./useTurn";
 import { FIRST_SENTENCE_BUDGET_MS, meanResponseMs } from "@/lib/measure";
+import { buildSummary } from "@/lib/summary";
 import type {
   Debrief,
+  Fumble,
   FumbleDeckEntry,
   GrammarPoint,
   SessionState,
@@ -70,6 +73,17 @@ export function SessionView({ initial }: { initial: SessionState }) {
    * that can disagree with the transcript after a reload.
    */
   const [words, setWords] = useState<WordLedger>(initial.words);
+  /**
+   * This session's fumbles, as the server last reported them.
+   *
+   * Not the deck — the moments. They are here for the end-of-session summary,
+   * which counts walk-aways and works out which fumbled words came back out, and
+   * both are counts over the session's own rows. Seeded from the server so
+   * reloading a finished session rebuilds the same summary, and replaced by each
+   * commit so the summary is ready the instant the session ends rather than one
+   * request later.
+   */
+  const [fumbles, setFumbles] = useState<Fumble[]>(initial.fumbles);
   /** What the in-flight turn is for, so Retry can repeat it. */
   const [attempt, setAttempt] = useState<string | null>(null);
   const openedFor = useRef<string | null>(null);
@@ -179,6 +193,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
         // committed turn, and it is the server's ledger because the server is what
         // read the turns.
         setWords(lastCommit.words);
+        setFumbles(lastCommit.fumbles);
       } else {
         // The conversation did not advance. The draft was never touched, so the
         // typed text is still in the field, ready to retry.
@@ -228,6 +243,9 @@ export function SessionView({ initial }: { initial: SessionState }) {
     setSprints(state.sprints);
     setActive(null);
     setTurns(state.turns);
+    setFumbles(state.fumbles);
+    setDeckSize(state.fumbleDeckSize);
+    setDeck(state.fumbleDeck);
     setEnded(true);
   }, [busy, pendingDrill, session.id]);
 
@@ -268,8 +286,19 @@ export function SessionView({ initial }: { initial: SessionState }) {
     }
   }, [furiganaOn, session.id]);
 
-  const totalTurns = turns.filter((t) => t.role === "learner").length;
-  const average = meanResponseMs(turns);
+  /**
+   * The end-of-session account, rebuilt from whatever the server has committed.
+   *
+   * Held in memory rather than fetched when the session ends, because every input
+   * is already a projection of server state — the transcript, the sprints, and
+   * this session's fumbles all arrive on the same frames. That is what makes a
+   * reload of a finished session show the same summary the live one did, with no
+   * second request and no summary endpoint to fall out of step with the transcript.
+   */
+  const summary = useMemo(
+    () => buildSummary(session, turns, sprints, fumbles),
+    [session, turns, sprints, fumbles],
+  );
 
   return (
     <div className="shell">
@@ -312,17 +341,11 @@ export function SessionView({ initial }: { initial: SessionState }) {
                 left to play. Everything in it is still here.
               </p>
             ) : (
-              <p>
-                {sprints.filter((s) => s.status === "closed").length} of {sprints.length} sprints,{" "}
-                {totalTurns} turns,{" "}
-                {average === null
-                  ? "no answer times recorded."
-                  : `${Math.round(average / 1000)}s to answer on average.`}
-              </p>
+              <SessionSummaryCard summary={summary} />
             )}
             <p className="note">
-              Every sprint's debrief is in the transcript above, and the session is still on this
-              machine — scroll back through it whenever you want.
+              Every sprint&apos;s debrief is in the transcript above, and the session is still on
+              this machine — scroll back through it whenever you want.
             </p>
             <Link className="again" href="/">
               Start another session

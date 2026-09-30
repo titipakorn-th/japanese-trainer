@@ -17,6 +17,35 @@ const IDLE: TurnStream = { phase: "idle", text: "", failure: null };
 
 const NOT_SENT: SendResult = { ok: false, committed: [], firstSentenceMs: null };
 
+/**
+ * What to tell the learner when a request never became a turn.
+ *
+ * The distinction that matters is whether waiting will help, and one banner
+ * saying "something went wrong" for every case leaves the learner guessing —
+ * and the wrong guess is hammering a button that cannot work. So: a session the
+ * server does not have will not come back on its own, a server that errored or
+ * dropped the connection usually will, and each is said in the words that
+ * answer the question the learner is actually asking.
+ */
+function transportFailure(status: number): { message: string; retryable: boolean } {
+  if (status === 404) {
+    return {
+      message: "This session is not on the server any more. Retrying will not bring it back.",
+      retryable: false,
+    };
+  }
+  if (status === 409) {
+    return { message: "A turn is already in flight — let it finish.", retryable: true };
+  }
+  if (status >= 500) {
+    return {
+      message: "The app is running, but the server hit an error answering that. Worth retrying.",
+      retryable: true,
+    };
+  }
+  return { message: `The app refused the turn (HTTP ${status}).`, retryable: true };
+}
+
 export interface SendResult {
   ok: boolean;
   /**
@@ -86,11 +115,9 @@ export function useTurn(sessionId: string) {
         });
 
         if (!response.ok || !response.body) {
-          return fail(
-            response.status === 409
-              ? "A turn is already in flight."
-              : `The server refused the turn (HTTP ${response.status}).`,
-          );
+          const failure = transportFailure(response.status);
+          setStream({ phase: "failed", text: "", failure });
+          return NOT_SENT;
         }
 
         const reader = response.body.getReader();
@@ -144,6 +171,7 @@ export function useTurn(sessionId: string) {
                 fumbleDeckSize: event.fumbleDeckSize,
                 fumbleDeck: event.fumbleDeck,
                 words: event.words,
+                fumbles: event.fumbles,
               });
               result = {
                 ok: true,
@@ -183,15 +211,18 @@ export function useTurn(sessionId: string) {
         // than a generic note that something stopped.
         if (reported) return NOT_SENT;
         return fail("The partner's reply was cut off before it finished.");
-      } catch (err) {
+      } catch {
         if (controller.signal.aborted) {
           setStream(IDLE);
           return NOT_SENT;
         }
+        // The request never got an answer at all, so the most useful thing to
+        // say is the most likely cause. "The app is not running" is almost
+        // always what happened — the sessions are local, so the learner started
+        // this from their own machine — and it tells them what to do, where a
+        // bare "connection lost" only tells them something went wrong.
         return fail(
-          err instanceof Error && err.message
-            ? `Lost the connection. ${err.message}`
-            : "Lost the connection.",
+          "Can't reach the app — it may not be running. Nothing was sent, and your session is still on the server.",
         );
       } finally {
         busyRef.current = false;

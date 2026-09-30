@@ -403,6 +403,16 @@ export interface SessionState {
    * rather than a zeroed rail.
    */
   words: WordLedger;
+  /**
+   * Every fumble this session caught, in order.
+   *
+   * Not the deck — the moments. The end-of-session summary needs them to say how
+   * often the learner walked away from a turn and what happened to the words
+   * they fumbled, and both are counts over the session's own rows. Read from
+   * the server so a summary survives a reload of an ended session, the same way
+   * the transcript does.
+   */
+  fumbles: Fumble[];
   /** The session's furigana preference as the server holds it. */
   furiganaOn: boolean;
   /** Surfaces the learner has tapped to reveal, server-side. */
@@ -449,6 +459,17 @@ export interface Committed {
    * seen — the same rule as the deck above it.
    */
   words: WordLedger;
+  /**
+   * This session's fumbles as they stand after this commit.
+   *
+   * Carried on the same frame as the deck because the two answer different
+   * questions: the deck is what the learner still owes, and these are the
+   * moments that made it so. The end-of-session summary is built from them, so
+   * a session that ends on this frame can be summarised without a second
+   * request — and the moment a summary becomes available is the moment the
+   * session ends, which is exactly when the learner is looking for it.
+   */
+  fumbles: Fumble[];
 }
 
 /** Frames sent over the turn stream, in order. */

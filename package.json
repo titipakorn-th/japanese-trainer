@@ -8,9 +8,11 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "probe:model": "tsx scripts/probe-model.ts",
     "probe:tts": "tsx scripts/probe-tts.ts",
-    "probe:migrate": "tsx scripts/probe-migrate.ts"
+    "probe:migrate": "tsx scripts/probe-migrate.ts",
+    "probe:cold-start": "tsx scripts/probe-cold-start.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

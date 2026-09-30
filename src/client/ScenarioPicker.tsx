@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Scenario } from "@/lib/types";
+import type { LastSessionStats } from "@/server/stats";
 
 /**
  * The picker, which exists because a thirty-minute session is a commitment and
@@ -13,17 +14,28 @@ import type { Scenario } from "@/lib/types";
  * and the choice is really "which kind of conversation today" rather than a title
  * the learner has to already recognise. The scene list is the honest description
  * of what the next thirty minutes will be.
+ *
+ * The strip above the choices is the state the learner is walking into: the deck
+ * waiting to be worked through and what the last sitting met. Both come from the
+ * server's own arithmetic, so the numbers here are the numbers the next session
+ * will actually use.
  */
 export function ScenarioPicker({
   scenarios,
   sprints,
   minutes,
   sprintMinutes,
+  deckSize,
+  started,
+  last,
 }: {
   scenarios: Scenario[];
   sprints: number;
   minutes: number;
   sprintMinutes: number;
+  deckSize: number;
+  started: number;
+  last: LastSessionStats | null;
 }) {
   const router = useRouter();
   const [starting, setStarting] = useState<string | null>(null);
@@ -57,6 +69,42 @@ export function ScenarioPicker({
           about {minutes} minutes. Pick the kind of conversation you need today.
         </p>
       </header>
+
+      <div className="standing" aria-label="What is waiting">
+        <div className="standing-item" data-tone={deckSize === 0 ? "calm" : "deck"}>
+          <span className="standing-label">Fumble Deck</span>
+          <b className="standing-value">
+            {deckSize} {deckSize === 1 ? "word" : "words"}
+          </b>
+          <span className="standing-note">
+            {deckSize === 0
+              ? "Nothing owed — this one runs on new words."
+              : "waiting to be produced out loud"}
+          </span>
+        </div>
+
+        {last ? (
+          <div className="standing-item">
+            <span className="standing-label">Last session</span>
+            <b className="standing-value">
+              {last.words} new {last.words === 1 ? "word" : "words"}
+            </b>
+            <span className="standing-note">
+              {last.bailOuts > 0
+                ? `across ${last.turns} ${last.turns === 1 ? "turn" : "turns"}, ${last.bailOuts} left hanging`
+                : `across ${last.turns} ${last.turns === 1 ? "turn" : "turns"}, none left hanging`}
+            </span>
+          </div>
+        ) : (
+          <div className="standing-item">
+            <span className="standing-label">Last session</span>
+            <b className="standing-value">—</b>
+            <span className="standing-note">
+              {started === 0 ? "This would be your first one." : "Nothing finished yet."}
+            </span>
+          </div>
+        )}
+      </div>
 
       <div className="scenarios">
         {scenarios.map((scenario) => (

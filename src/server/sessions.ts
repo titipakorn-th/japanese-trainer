@@ -4,7 +4,7 @@ import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
 import { buildWordLedger } from "./words";
 import { buildDebrief } from "./debrief";
-import { clearDeckNaturals, getFumbleDeck, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
+import { clearDeckNaturals, getFumbleDeck, getSessionFumbles, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
 import { getGrammarPoint, pickGrammarPoint } from "./grammarPoints";
 import type {
   Debrief,
@@ -307,6 +307,7 @@ export function getSessionState(id: string): SessionState | null {
     // committed turns so a reload shows the slots actually filled rather than
     // ten empty pips and a learner wondering whether the session lost its work.
     words: buildWordLedger(getTurns(id), sprints.length),
+    fumbles: getSessionFumbles(id),
     furiganaOn: session.furiganaOn,
     revealedReadings: session.revealedReadings,
   };
