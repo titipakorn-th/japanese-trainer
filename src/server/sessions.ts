@@ -41,6 +41,7 @@ interface SessionRow {
   status: string;
   ended_at: number | null;
   furigana_on: number | null;
+  revealed_readings: string | null;
   grammar_point_slug: string | null;
 }
 
@@ -78,8 +79,20 @@ function toSession(row: SessionRow): Session {
     scenario: getScenario(row.scenario) ?? DEFAULT_SCENARIO,
     status: row.status === "ended" ? "ended" : "active",
     furiganaOn: row.furigana_on === 1,
+    revealedReadings: parseRevealedReadings(row.revealed_readings),
     grammarPoint: resolveGrammarPoint(row.grammar_point_slug),
   };
+}
+
+function parseRevealedReadings(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is string => typeof s === "string");
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -206,7 +219,7 @@ export function createSession(scenario: Scenario = DEFAULT_SCENARIO): Session {
   const grammarPoint = pickGrammarPoint(scenario, grammarPointUsage());
 
   db.transaction(() => {
-    db.prepare("INSERT INTO session (id, created_at, scenario, status, ended_at, furigana_on, grammar_point_slug) VALUES (?, ?, ?, 'active', NULL, 0, ?)").run(
+    db.prepare("INSERT INTO session (id, created_at, scenario, status, ended_at, furigana_on, revealed_readings, grammar_point_slug) VALUES (?, ?, ?, 'active', NULL, 0, '[]', ?)").run(
       id,
       now,
       scenario.slug,
@@ -233,6 +246,7 @@ export function createSession(scenario: Scenario = DEFAULT_SCENARIO): Session {
     scenario,
     status: "active",
     furiganaOn: false,
+    revealedReadings: [],
     grammarPoint,
   };
 }
@@ -289,6 +303,7 @@ export function getSessionState(id: string): SessionState | null {
     fumbleDeck,
     fumbleDeckSize: fumbleDeck.length,
     furiganaOn: session.furiganaOn,
+    revealedReadings: session.revealedReadings,
   };
 }
 

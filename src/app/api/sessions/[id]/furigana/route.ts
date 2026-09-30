@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, setSessionFurigana } from "@/server/sessions";
+import { setSessionFurigana } from "@/server/sessions";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -12,9 +12,6 @@ type Context = { params: Promise<{ id: string }> };
  */
 export async function PATCH(request: Request, { params }: Context) {
   const { id } = await params;
-  if (!getSession(id)) {
-    return NextResponse.json({ error: "This session does not exist." }, { status: 404 });
-  }
 
   let on: unknown;
   try {
@@ -28,8 +25,11 @@ export async function PATCH(request: Request, { params }: Context) {
   }
 
   const result = setSessionFurigana(id, on);
-  if (result === null) {
+  if (result.kind === "missing") {
+    return NextResponse.json({ error: "This session does not exist." }, { status: 404 });
+  }
+  if (result.kind === "ended") {
     return NextResponse.json({ error: "This session has ended." }, { status: 404 });
   }
-  return NextResponse.json({ furiganaOn: result });
+  return NextResponse.json(result.value);
 }

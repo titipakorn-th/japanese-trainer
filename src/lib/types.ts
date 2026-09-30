@@ -106,6 +106,13 @@ export interface Session {
    * on, it stays on until the session ends.
    */
   furiganaOn: boolean;
+  /**
+   * Surfaces the learner has tapped to reveal so far, in the order they tapped
+   * them. Server-side so a reload, a fresh tab, or any other browser pointed at
+   * the same session sees the same revealed readings — which is what "stays
+   * revealed for the rest of the Session" means.
+   */
+  revealedReadings: string[];
 }
 
 /**
@@ -296,6 +303,8 @@ export interface SessionState {
   fumbleDeckSize: number;
   /** The session's furigana preference as the server holds it. */
   furiganaOn: boolean;
+  /** Surfaces the learner has tapped to reveal, server-side. */
+  revealedReadings: string[];
 }
 
 /** The turn budgets and clocks a session runs on. See `pacing.ts`. */

@@ -54,11 +54,13 @@ CREATE TABLE IF NOT EXISTS fumble (
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session (
-  id         TEXT PRIMARY KEY,
-  created_at INTEGER NOT NULL,
-  scenario   TEXT NOT NULL,
-  status     TEXT NOT NULL DEFAULT 'active',
-  ended_at   INTEGER,
+  id                TEXT PRIMARY KEY,
+  created_at        INTEGER NOT NULL,
+  scenario          TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'active',
+  ended_at          INTEGER,
+  furigana_on       INTEGER NOT NULL DEFAULT 0,
+  revealed_readings TEXT NOT NULL DEFAULT '[]',
   grammar_point_slug TEXT
 );
 
@@ -102,6 +104,7 @@ const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
   ["fumble", "drilled", "INTEGER NOT NULL DEFAULT 0"],
   ["fumble", "cleared_at", "INTEGER"],
   ["session", "furigana_on", "INTEGER NOT NULL DEFAULT 0"],
+  ["session", "revealed_readings", "TEXT NOT NULL DEFAULT '[]'"],
   ["session", "grammar_point_slug", "TEXT"],
 ];
 
