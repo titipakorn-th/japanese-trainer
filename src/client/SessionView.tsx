@@ -42,6 +42,13 @@ export function SessionView({ initial }: { initial: SessionState }) {
   const [draft, setDraft] = useState("");
   const [pendingLearner, setPendingLearner] = useState<string | null>(null);
   const [latency, setLatency] = useState<number | null>(null);
+  /**
+   * The Fumble Deck as it stood when the page was rendered. Updated to the size
+   * the server returned with the most recent commit, so the rail always shows
+   * the count the conversation actually earned, including fumbles that landed
+   * mid-session.
+   */
+  const [deckSize, setDeckSize] = useState<number>(initial.fumbleDeckSize);
   /** What the in-flight turn is for, so Retry can repeat it. */
   const [attempt, setAttempt] = useState<string | null>(null);
   const openedFor = useRef<string | null>(null);
@@ -77,6 +84,11 @@ export function SessionView({ initial }: { initial: SessionState }) {
         setAttempt(null);
         setDraft("");
         setLatency(result.firstSentenceMs);
+        // Each commit reports the deck size after it landed, so the rail grows
+        // only when a fumble actually added a new word. The number the learner
+        // sees is the number the database has.
+        const finalSize = result.committed[result.committed.length - 1]!.fumbleDeckSize;
+        setDeckSize(finalSize);
       } else {
         // The conversation did not advance. The draft was never touched, so the
         // typed text is still in the field, ready to retry.
@@ -226,7 +238,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
         )}
       </div>
 
-      <Rail sprints={sprints} turns={turns} latency={latency} />
+      <Rail sprints={sprints} turns={turns} latency={latency} deckSize={deckSize} />
     </div>
   );
 }
@@ -360,10 +372,12 @@ function Rail({
   sprints,
   turns,
   latency,
+  deckSize,
 }: {
   sprints: Sprint[];
   turns: Turn[];
   latency: number | null;
+  deckSize: number;
 }) {
   const counts: Record<"new" | "grammar", number> = { new: 0, grammar: 0 };
   for (const turn of turns) {
@@ -403,6 +417,10 @@ function Rail({
         <div className="stat">
           <span>Grammar Point uses</span>
           <b>{counts.grammar}</b>
+        </div>
+        <div className="stat" data-fumble-zero={deckSize === 0 ? "1" : "0"}>
+          <span>Fumble Deck</span>
+          <b>{deckSize}</b>
         </div>
         {next ? (
           <p className="note">

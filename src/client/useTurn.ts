@@ -139,6 +139,7 @@ export function useTurn(sessionId: string) {
                 sprint: event.sprint,
                 debrief: event.debrief,
                 status: event.status,
+                fumbleDeckSize: event.fumbleDeckSize,
               });
               result = {
                 ok: true,

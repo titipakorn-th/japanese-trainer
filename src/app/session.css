@@ -415,6 +415,60 @@
   color: #bfe7cc;
 }
 
+/*
+ * Fumbles ride the same debrief card as corrections and new words. The reason
+ * tag is what makes a fumble different from a quiet correction: a correction is
+ * the partner's rephrasing, a fumble is what the learner said wrong and why. The
+ * situation below each row is the partner's last line — what the learner was
+ * reacting to — so the card answers "why did they reach for this word" without
+ * making the learner scroll back through the transcript.
+ */
+.debrief .fumble-list {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid #1d3324;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.debrief .fumble-list-head {
+  font: 700 9.5px/1 var(--ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #c8a06a;
+}
+
+.debrief .fumble-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debrief .fumble-reason {
+  font: 700 9px/1 var(--ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #d8b079;
+  align-self: flex-start;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(224, 160, 58, 0.12);
+  border: 1px solid rgba(224, 160, 58, 0.3);
+}
+
+.debrief .fumble-reason[data-reason="abandoned"] {
+  color: #f0a698;
+  background: rgba(224, 87, 74, 0.12);
+  border-color: rgba(224, 87, 74, 0.3);
+}
+
+.debrief .fumble-situation {
+  font: 400 11.5px/1.5 var(--jp);
+  color: var(--ink-faint);
+  padding-left: 1px;
+}
+
 /* ------------------------------------------------------------------- wrap */
 
 .wrap {
@@ -699,6 +753,16 @@
 .stat b {
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The Fumble Deck count is the only honest signal we have that detection is
+ * alive. A card that reads 0 mid-session is the silent-regression cue the spec
+ * calls out, so the zero state is amber-on-dark rather than the usual faint ink,
+ * to make a stopped deck visible at a glance.
+ */
+.stat[data-fumble-zero="1"] b {
+  color: var(--fumble-ink);
 }
 
 /* -------------------------------------------------------------- composer */

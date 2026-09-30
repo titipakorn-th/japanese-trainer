@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Marker, MarkerKind } from "@/lib/types";
+import type { FumbleReason, Marker, MarkerKind } from "@/lib/types";
 
 /**
  * The model answers in two parts: the partner's line, and the annotations that
@@ -16,6 +16,11 @@ import type { Marker, MarkerKind } from "@/lib/types";
  * the prompt and never fills it in. A line it is told to write after its reply
  * is a shape it can actually produce, so the quiet correction is a line and the
  * inline markers stay in the fenced block, where they are reliable.
+ *
+ * Fumbles ride the same block as markers. They are not markers — they are stored
+ * separately on the Fumble Deck — but they share the streaming shape so the same
+ * call still produces everything the app needs to show. The deck is what makes
+ * silent regressions visible.
  */
 
 const FENCE = "```";
@@ -27,6 +32,19 @@ export interface ParsedReply {
   text: string;
   naturalPhrasing: string | null;
   markers: Marker[];
+  /**
+   * Fumbles caught during this exchange. Empty for an opening turn, where the
+   * learner has not spoken, and for the rare turn whose metadata block the model
+   * dropped. Each entry has a surface that may be the empty string for an
+   * abandoned turn — the deck still gains the moment, no marker is rendered.
+   */
+  fumbles: ParsedFumble[];
+}
+
+export interface ParsedFumble {
+  surface: string;
+  natural: string;
+  reason: FumbleReason;
 }
 
 interface RawMarker {
@@ -37,7 +55,20 @@ interface RawMarker {
   meaning?: unknown;
 }
 
+interface RawFumble {
+  surface?: unknown;
+  natural?: unknown;
+  reason?: unknown;
+}
+
 const KINDS: ReadonlySet<string> = new Set<MarkerKind>(["new", "fumble", "grammar"]);
+
+const REASONS: ReadonlySet<string> = new Set<FumbleReason>([
+  "abandoned",
+  "compressed",
+  "hedged",
+  "wrong-form",
+]);
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -166,11 +197,38 @@ function naturalPhrasingFor(
 }
 
 /**
+ * The fumbles the model reported, with each field narrowed to what it actually is.
+ *
+ * A missing `reason`, an unknown one, or a missing `natural` drops the entry. A
+ * `surface` that is not a string becomes an empty string, which is the
+ * abandoned-turn case — the deck gains a moment, no marker is rendered. Dropping
+ * a malformed entry is the right move because the deck is the only honest signal
+ * we have that detection is alive, and a phantom word with no natural form is
+ * something the learner cannot act on.
+ */
+function parseFumbles(raw: unknown): ParsedFumble[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ParsedFumble[] = [];
+  for (const item of raw as RawFumble[]) {
+    const natural = str(item?.natural);
+    const reason = str(item?.reason);
+    if (!natural || !REASONS.has(reason)) continue;
+    out.push({
+      surface: str(item?.surface),
+      natural,
+      reason: reason as FumbleReason,
+    });
+  }
+  return out;
+}
+
+/**
  * Turn a completed stream into a displayable turn.
  *
  * A missing or malformed metadata block is not a failure. The turn still
  * happened; it just arrives without inline markers. Failing here would throw
- * away a good exchange over a cosmetic defect.
+ * away a good exchange over a cosmetic defect. The same applies to fumbles: a
+ * turn with no fumble block is a turn with no fumbles, not a turn that broke.
  */
 export function parseReply(raw: string, whatLearnerSaid: string | null = null): ParsedReply {
   const { prose, correction, metadata } = splitReply(raw);
@@ -178,7 +236,7 @@ export function parseReply(raw: string, whatLearnerSaid: string | null = null): 
   const natural = naturalPhrasingFor(correction?.trim() ?? "", whatLearnerSaid, text);
 
   if (metadata === null) {
-    return { text, naturalPhrasing: natural, markers: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
   }
 
   // The fence is followed by a language tag on some responses.
@@ -188,16 +246,18 @@ export function parseReply(raw: string, whatLearnerSaid: string | null = null): 
   try {
     parsed = JSON.parse(end >= 0 ? body.slice(0, end) : body);
   } catch {
-    return { text, naturalPhrasing: natural, markers: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    return { text, naturalPhrasing: natural, markers: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
   }
 
+  const obj = parsed as { markers?: unknown; fumbles?: unknown };
   return {
     text,
     naturalPhrasing: natural,
-    markers: parseMarkers(text, (parsed as { markers?: unknown }).markers),
+    markers: parseMarkers(text, obj.markers),
+    fumbles: parseFumbles(obj.fumbles),
   };
 }

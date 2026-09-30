@@ -242,6 +242,14 @@ export interface Committed {
   /** Set only on the exchange that closed the sprint. */
   debrief: Debrief | null;
   status: SessionStatus;
+  /**
+   * Distinct natural forms on the Fumble Deck after this commit. The rail
+   * shows it during the session, and the size grows whenever a fumble lands
+   * in a new word. A reload mid-session reads the same number from the
+   * server, so a learner who picks up where they left off sees what they
+   * actually earned.
+   */
+  fumbleDeckSize: number;
 }
 
 /** Frames sent over the turn stream, in order. */

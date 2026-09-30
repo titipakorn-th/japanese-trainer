@@ -1,6 +1,11 @@
 import { buildSystemPrompt, type Moment, type PromptContext } from "./prompt";
 import { ModelError, modelTimeoutMs, streamChat } from "./minimax";
-import { parseReply, visibleProse, type ParsedReply } from "./parse";
+import {
+  parseReply,
+  visibleProse,
+  type ParsedFumble,
+  type ParsedReply,
+} from "./parse";
 import { readStance, type Spoken, type Stance } from "./stance";
 import { closeSprint, sessionExpired, pacing } from "./pacing";
 import {
@@ -12,7 +17,9 @@ import {
   getTurns,
   type NewTurn,
 } from "./sessions";
-import type { Sprint, SprintEnding, Turn, TurnEvent } from "@/lib/types";
+import { insertFumbles, getFumbleDeckSize, type DetectedFumble } from "./fumbles";
+import { fumbleMarkers } from "./fumbleMarkers";
+import type { Marker, Sprint, SprintEnding, Turn, TurnEvent } from "@/lib/types";
 import { firstSentenceEnd } from "@/lib/sentences";
 
 /**
@@ -216,11 +223,14 @@ export async function runTurn(
     return parsed;
   };
 
-  const learnerTurn = (text: string, naturalPhrasing: string | null): NewTurn & { responseMs: number | null } => ({
+  const learnerTurn = (text: string, naturalPhrasing: string | null, fumbles: ParsedFumble[] = []): NewTurn & { responseMs: number | null } => ({
     role: "learner",
     text,
     naturalPhrasing,
-    markers: [],
+    // Fumble markers anchor against the learner's own text, which is what makes
+    // them useful: tapping the underlined word tells the learner what they should
+    // have said, in the place where they actually said the wrong thing.
+    markers: fumbleMarkers(text, fumbles),
     responseMs,
   });
 
@@ -254,11 +264,23 @@ export async function runTurn(
       );
       if (parsed === null) return;
 
+      // The situation a fumble happened in is the partner's last line — what the
+      // learner was responding to when they reached for the wrong word. Captured
+      // here, not deeper inside `commitExchange`, because the closing call below
+      // uses the same field and a single source is easier to keep honest.
+      const lastPartner = [...inSprint].reverse().find((t) => t.role === "partner");
+      const situation = lastPartner?.text ?? sprint.brief.goal;
+      const capture =
+        learnerText !== null && parsed.fumbles.length > 0
+          ? { detected: parsed.fumbles, situation, learnerSaid: learnerText }
+          : null;
+
       const { learnerTurn: written, partnerTurn } = commitExchange(
         sessionId,
-        learnerText === null ? null : learnerTurn(learnerText, parsed.naturalPhrasing),
+        learnerText === null ? null : learnerTurn(learnerText, parsed.naturalPhrasing, parsed.fumbles),
         { role: "partner", text: parsed.text, naturalPhrasing: null, markers: parsed.markers },
         sprint,
+        capture,
       );
 
       emit({
@@ -269,6 +291,7 @@ export async function runTurn(
         sprint,
         debrief: null,
         status: "active",
+        fumbleDeckSize: getFumbleDeckSize(),
       });
       return;
     }
@@ -307,17 +330,29 @@ export async function runTurn(
     // next scene the null is the plan running out, which is how a session ends.
     if (next && opening === null) return;
 
+    // The closing learner's turn is still in scope for fumble capture. Its
+    // situation is the partner's last line in the closing scene — same field as
+    // a mid-scene reply, so the debrief and the deck read the same way.
+    const lastPartner = [...history].reverse().find((t) => t.role === "partner");
+    const closingSituation = lastPartner?.text ?? sprint.brief.goal;
+    const fumbleCapture =
+      learnerText !== null && closing.fumbles.length > 0
+        ? { detected: closing.fumbles, situation: closingSituation, learnerSaid: learnerText }
+        : null;
+
     const result = commitBoundary(sessionId, sprint, {
-      learner: learnerText === null ? null : learnerTurn(learnerText, closing.naturalPhrasing),
+      learner: learnerText === null ? null : learnerTurn(learnerText, closing.naturalPhrasing, closing.fumbles),
       closing: { role: "partner", text: closing.text, naturalPhrasing: null, markers: closing.markers },
       endedBy,
       next,
       opening: opening
         ? { role: "partner", text: opening.text, naturalPhrasing: null, markers: opening.markers }
         : null,
+      fumbles: fumbleCapture,
     });
 
     const status = result.nextSprint ? "active" : "ended";
+    const deckSize = getFumbleDeckSize();
     emit({
       t: "done",
       learnerTurn: result.learnerTurn,
@@ -332,6 +367,7 @@ export async function runTurn(
       },
       debrief: result.debrief,
       status,
+      fumbleDeckSize: deckSize,
     });
 
     if (result.nextSprint && result.openingTurn) {
@@ -343,6 +379,7 @@ export async function runTurn(
         sprint: result.nextSprint,
         debrief: null,
         status,
+        fumbleDeckSize: deckSize,
       });
     }
   } catch (err) {

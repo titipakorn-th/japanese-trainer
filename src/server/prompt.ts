@@ -11,8 +11,8 @@ import type { Stance } from "./stance";
  * conversations, and a partner that wanders between them has abandoned both. The
  * reply has to be short and front-loaded, because the first sentence is the only
  * part the learner waits on. The whole thing has to stay small: prompt length is
- * paid twice, once in prefill and once in how much the model has to think about,
- * and a longer prompt measurably pushes the first sentence later. And it has to
+ * paid twice, once in prefill and once in how much the model thinks about, and
+ * a longer prompt measurably pushes the first sentence later. And it has to
  * know where in the scene it is — ask a model to greet a customer who is already
  * ordering and it will greet them again, every turn, forever.
  *
@@ -30,6 +30,16 @@ import type { Stance } from "./stance";
  * worked example and ignores a specification, which is why each scene carries
  * its own opening line, its own correction line, and its own New Word: one
  * example, in this voice, in this place.
+ *
+ * Detection prompt — handle with care. Fumble capture is the part of the app
+ * that protects the Fumble Deck, and the deck is the load-bearing signal that
+ * the rest of the product has anything to build on. There are no automated
+ * tests for detection, and a regression here is invisible to the conversation
+ * itself: words still get taught, scenes still flow, and the only sign of
+ * trouble is a deck count that stays at zero mid-session. Whenever this file
+ * is touched, drive the app and read the deck count off the coach rail before
+ * shipping — a deck that stopped growing is a regression even when nothing
+ * looks broken.
  */
 
 /**
@@ -93,12 +103,20 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 
   const example = moment === "closing" ? NEUTRAL_CLOSING : brief.openingLine;
   const correctionExample = moment === "reply" ? `修正: ${brief.correctionLine}` : "";
-  const markers =
+  // The example JSON is one object, with both `markers` and (for a reply) `fumbles`.
+  // Splitting the construction into the inner contents and the wrapping braces
+  // means the model sees a syntactically valid object — the small model copies
+  // the shape of the example rather than following the spec, so a malformed
+  // example is a missing fumbles block in the wild.
+  const markerItem = `{"surface": ${JSON.stringify(word.surface)}, "kind": "new", ` +
+    `"reading": ${JSON.stringify(word.reading)}, "meaning": ${JSON.stringify(word.meaning)}, ` +
+    `"example": ${JSON.stringify(word.example)}}`;
+  const fumblesTail =
+    moment === "reply" ? `, "fumbles": [{"surface": "billing", "natural": "会計", "reason": "hedged"}]` : "";
+  const exampleJson =
     moment === "closing"
-      ? '{"markers": []}'
-      : `{"markers": [{"surface": ${JSON.stringify(word.surface)}, "kind": "new", ` +
-        `"reading": ${JSON.stringify(word.reading)}, "meaning": ${JSON.stringify(word.meaning)}, ` +
-        `"example": ${JSON.stringify(word.example)}}]}`;
+      ? `{"markers": []${fumblesTail}}`
+      : `{"markers": [${markerItem}]${fumblesTail}}`;
 
   // The scenes already run, as one line. Without it a partner handed sprint four
   // has no idea it is the fourth, and re-asks what the third one already covered.
@@ -117,7 +135,7 @@ ${momentLine}
 ${GREETING_LINES[moment]}
 
 守ること:
-- 日本語だけ。<think>タグも英語も説明も前置きも書かない。
+- 日本語だけ。<think></think>タグも英語も説明も前置きも書かない。
 - 最初の文は短く、十五文字以内。いちばん言いたいことをその中に入れる。
 - 一文か二文で終える。長い説明はしない。
 - 学習者が実際に書いた言葉を受けて返事する。決まりの台詞を返さない。
@@ -139,10 +157,16 @@ ${GREETING_LINES[moment]}
 ${example}
 ${correctionExample}
 \`\`\`json
-${markers}
+${exampleJson}
 \`\`\`
 
 markers: 本文にそのまま現れる語に印をつける。surface は本文に実在する文字列。
   kind は "new"（初めて会う語）か "grammar"（今日使う文型）。
-  ${markerHint(moment, stance)}`;
+  ${markerHint(moment, stance)}
+
+fumbles: 学習者の今回の一言からfumれた瞬間を報告する。一件もない時は空配列。
+  - surface: 学習者の発言に実在する文字列（マーカーで囲む部分）。発言全体がfumれた時は空文字。
+  - natural: 学習者が言うべきだった自然な表現。日本語で。
+  - reason: "abandoned"（発言全体が成立していない、空・英語のみ・完全に話題外）／ "compressed"（必要な言い方が短すぎる）／ "hedged"（言いたかった語の周りを遠回り、詰まった）／ "wrong-form"（助詞・活用・語彙が日本語として不自然）。
+  fumれの境界が曖昧な時は無理に一件にせず、省く。`;
 }
