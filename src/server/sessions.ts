@@ -755,15 +755,39 @@ export const commitDrillResponse = db.transaction(
  * Furigana is a session-scoped display preference: the learner turns it on once
  * and it stays on for the rest of the session, including across reloads. A
  * session that has already ended cannot be flipped — the learner can no longer
- * see its transcript, so changing the preference is meaningless. Returns the
- * resulting flag, or null when the session does not exist or has ended.
+ * see its transcript, so changing the preference is meaningless.
  */
-export function setSessionFurigana(sessionId: string, on: boolean): boolean | null {
+export function setSessionFurigana(
+  sessionId: string,
+  on: boolean,
+): { kind: "ok"; value: { furiganaOn: boolean } } | { kind: "ended" } | { kind: "missing" } {
   const session = getSession(sessionId);
-  if (!session) return null;
-  if (session.status === "ended") return null;
+  if (!session) return { kind: "missing" };
+  if (session.status === "ended") return { kind: "ended" };
   db.prepare("UPDATE session SET furigana_on = ? WHERE id = ?").run(on ? 1 : 0, sessionId);
-  return on;
+  return { kind: "ok", value: { furiganaOn: on } };
+}
+
+/**
+ * Add one surface form to the session's revealed-readings set.
+ */
+export function addRevealedReading(
+  sessionId: string,
+  surface: string,
+): { kind: "ok"; value: { revealedReadings: string[] } } | { kind: "ended" } | { kind: "missing" } {
+  const session = getSession(sessionId);
+  if (!session) return { kind: "missing" };
+  if (session.status === "ended") return { kind: "ended" };
+  const list = (session as { revealedReadings?: string[] }).revealedReadings ?? [];
+  if (list.includes(surface)) {
+    return { kind: "ok", value: { revealedReadings: list } };
+  }
+  const next = [...list, surface];
+  db.prepare("UPDATE session SET revealed_readings = ? WHERE id = ?").run(
+    JSON.stringify(next),
+    sessionId,
+  );
+  return { kind: "ok", value: { revealedReadings: next } };
 }
 
 /**
