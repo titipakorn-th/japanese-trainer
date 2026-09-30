@@ -25,22 +25,29 @@ import type { Pacing, SprintEnding } from "@/lib/types";
 
 const MINUTE = 60_000;
 
-function num(raw: string | undefined, fallback: number): number {
+/**
+ * A positive number from the environment, or the fallback.
+ *
+ * Shared rather than reimplemented per module because the alternative is two
+ * copies of the same three-line reader drifting apart on what counts as set — and
+ * "is this tunable actually set?" is not a question to answer two ways.
+ */
+export function envNum(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function pacing(): Pacing {
   return {
-    sprintTurns: Math.round(num(process.env.SPRINT_TURNS, 20)),
-    sprintMs: num(process.env.SPRINT_MS, 6 * MINUTE),
-    sessionMs: num(process.env.SESSION_MS, 30 * MINUTE),
+    sprintTurns: Math.round(envNum(process.env.SPRINT_TURNS, 20)),
+    sprintMs: envNum(process.env.SPRINT_MS, 6 * MINUTE),
+    sessionMs: envNum(process.env.SESSION_MS, 30 * MINUTE),
   };
 }
 
 /** Sprints to a session, clamped to the 4–6 the spec asks for and to what the family has. */
 export function sprintsPerSession(available: number): number {
-  const asked = Math.round(num(process.env.SPRINTS_PER_SESSION, 5));
+  const asked = Math.round(envNum(process.env.SPRINTS_PER_SESSION, 5));
   // Never below one, because a session with no sprint has nothing to play. Not
   // floored at four: a family with three scenes would have to repeat one, and a
   // repeated scene is worse than a session of three.

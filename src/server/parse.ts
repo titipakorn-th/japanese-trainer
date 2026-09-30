@@ -99,7 +99,13 @@ interface RawProduced {
   natural?: unknown;
 }
 
-const KINDS: ReadonlySet<string> = new Set<MarkerKind>(["new", "fumble", "grammar", "deck"]);
+const KINDS: ReadonlySet<string> = new Set<MarkerKind>([
+  "new",
+  "revisit",
+  "fumble",
+  "grammar",
+  "deck",
+]);
 
 const REASONS: ReadonlySet<string> = new Set<FumbleReason>([
   "abandoned",
@@ -167,10 +173,10 @@ function parseMarkers(text: string, raw: unknown): Marker[] {
     const kind = str(item?.kind);
     if (!surface || !KINDS.has(kind)) continue;
     const at = text.indexOf(surface);
-    // A surface that is not in the text, or that the learner has already met,
-    // is dropped rather than misplaced. This slice anchors a marker to the first
-    // occurrence only, so a word used twice in a turn gets one marker; marking
-    // every occurrence is the New Word work.
+    // A surface that is not in the text is dropped rather than misplaced. The
+    // model is told the surface must appear verbatim and occasionally does not
+    // manage it; a marker with nowhere to sit is a marker the renderer would
+    // have to invent a position for.
     if (at < 0) continue;
     candidates.push({
       marker: {
@@ -192,14 +198,26 @@ function parseMarkers(text: string, raw: unknown): Marker[] {
   const placed: Marker[] = [];
   let cursor = 0;
   for (const c of candidates) {
-    if (c.at < cursor) continue;
+    let at = c.at;
+    // Two markers for the same surface in one reply — a word introduced and then
+    // needed again a sentence later — both resolve to the first occurrence and
+    // would collide here. The second one takes the next occurrence instead of
+    // being dropped, because the reuse is the whole point of the New Word loop:
+    // dropping it would leave the transcript showing a first meeting and nothing
+    // else, and the debrief would ask the learner to recall a word the app has
+    // no record of needing twice.
+    if (at < cursor) {
+      const next = text.indexOf(c.marker.surface, cursor);
+      if (next < 0) continue;
+      at = next;
+    }
     placed.push({
       id: randomUUID(),
       ...c.marker,
-      start: c.at,
-      end: c.at + c.marker.surface.length,
+      start: at,
+      end: at + c.marker.surface.length,
     });
-    cursor = c.at + c.marker.surface.length;
+    cursor = at + c.marker.surface.length;
   }
   return placed;
 }

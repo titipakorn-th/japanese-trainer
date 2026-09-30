@@ -8,7 +8,15 @@ import { SprintTrack } from "./SprintTrack";
 import { StreamedText } from "./StreamedText";
 import { useTurn } from "./useTurn";
 import { meanResponseMs } from "@/lib/measure";
-import type { Debrief, FumbleDeckEntry, GrammarPoint, SessionState, Sprint, Turn } from "@/lib/types";
+import type {
+  Debrief,
+  FumbleDeckEntry,
+  GrammarPoint,
+  SessionState,
+  Sprint,
+  Turn,
+  WordLedger,
+} from "@/lib/types";
 
 const BUDGET_MS = 900;
 
@@ -90,6 +98,13 @@ export function SessionView({ initial }: { initial: SessionState }) {
    * cleared.
    */
   const [deck, setDeck] = useState<FumbleDeckEntry[]>(initial.fumbleDeck);
+  /**
+   * The New Word ledger as the server last reported it. Held in state rather than
+   * counted from the turns on screen for the same reason the deck is: the client is
+   * a projection of the session, and a count the client keeps itself is a count
+   * that can disagree with the transcript after a reload.
+   */
+  const [words, setWords] = useState<WordLedger>(initial.words);
   /** What the in-flight turn is for, so Retry can repeat it. */
   const [attempt, setAttempt] = useState<string | null>(null);
   const openedFor = useRef<string | null>(null);
@@ -174,6 +189,10 @@ export function SessionView({ initial }: { initial: SessionState }) {
         const lastCommit = result.committed[result.committed.length - 1]!;
         setDeckSize(lastCommit.fumbleDeckSize);
         setDeck(lastCommit.fumbleDeck);
+        // Same on the word budget: a slot fills because a marker landed on a
+        // committed turn, and it is the server's ledger because the server is what
+        // read the turns.
+        setWords(lastCommit.words);
       } else {
         // The conversation did not advance. The draft was never touched, so the
         // typed text is still in the field, ready to retry.
@@ -371,7 +390,15 @@ export function SessionView({ initial }: { initial: SessionState }) {
         )}
       </div>
 
-      <Rail sprints={sprints} turns={turns} latency={latency} deckSize={deckSize} deck={deck} grammarPoint={session.grammarPoint} />
+      <Rail
+        sprints={sprints}
+        turns={turns}
+        latency={latency}
+        deckSize={deckSize}
+        deck={deck}
+        grammarPoint={session.grammarPoint}
+        words={words}
+      />
     </div>
   );
 }
@@ -554,6 +581,75 @@ function Feed({
   );
 }
 
+/**
+ * The session's ten word slots, filling as words are met.
+ *
+ * A bare count cannot show the thing the issue asks for. "New Words met: 6" is a
+ * number the learner has no way to situate; ten slots is a shape they can watch
+ * fill, and the empty ones are the honest part — they say the session has four
+ * words still to give, which is the thing a learner can actually aim at.
+ *
+ * The two sources are kept apart rather than summed, because they are not the same
+ * kind of word and conflating them would misrepresent what happened. A New Word
+ * is a fact the learner has read once. A Deck Word is one they failed before and
+ * have now been made to reach for again, and the issue is explicit that this half
+ * is the more valuable one. Colour follows the transcript's own markers, so a
+ * learner who taps a word in the conversation finds the same blue in the rail.
+ *
+ * `seenAgain` gets its own badge rather than a colour, because it is a different
+ * axis: a word can be new *and* already needed a second time, and folding that
+ * into the fill colour would lose the one number that says whether the session is
+ * training vocabulary or just reading it.
+ */
+function WordSlots({ ledger }: { ledger: WordLedger }) {
+  const filled = ledger.slots;
+  const total = Math.max(ledger.target, filled.length);
+
+  return (
+    <div className="word-slots">
+      <div className="stat">
+        <span>New Words</span>
+        <b>
+          {filled.length} of {total}
+        </b>
+      </div>
+      <ol className="slot-row" aria-label={`New Words met: ${filled.length} of ${total}`}>
+        {Array.from({ length: total }, (_, i) => {
+          const slot = filled[i];
+          if (!slot) {
+            return <li key={`empty${i}`} className="slot empty" aria-hidden="true" />;
+          }
+          return (
+            <li
+              key={slot.surface}
+              className="slot"
+              data-kind={slot.kind}
+              data-again={slot.seenAgain ? "1" : "0"}
+              title={`${slot.surface}${slot.reading ? ` (${slot.reading})` : ""} — ${
+                slot.kind === "deck" ? "from the Fumble Deck" : "new this session"
+              }${slot.seenAgain ? ", needed again later" : ""}`}
+            >
+              <span className="jp">{slot.surface}</span>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="note">
+        {/* Both halves shown against their own target rather than as one total, so a
+            session that has filled its new half but none of its deck half is visibly
+            half-done rather than invisibly behind. */}
+        {ledger.newMet}/{ledger.newTarget} new · {ledger.deckMet}/{ledger.deckTarget} from the deck
+        {ledger.seenAgain > 0 ? (
+          <>
+            {" · "}
+            {ledger.seenAgain} needed a second time
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
 function Rail({
   sprints,
   turns,
@@ -561,6 +657,7 @@ function Rail({
   deckSize,
   deck,
   grammarPoint,
+  words,
 }: {
   sprints: Sprint[];
   turns: Turn[];
@@ -568,11 +665,17 @@ function Rail({
   deckSize: number;
   deck: FumbleDeckEntry[];
   grammarPoint: GrammarPoint | null;
+  words: WordLedger;
 }) {
-  const counts: Record<"new" | "grammar" | "deck", number> = { new: 0, grammar: 0, deck: 0 };
+  // Grammar and deck only. New Words are counted by the ledger the server sends,
+  // not here — the rail reading a number off the transcript and the prompt reading
+  // a number off the same transcript is exactly the pair that drifts after a
+  // reload. `deck` is still counted locally because it counts marker *occurrences*
+  // rather than distinct words met, and nothing else reports that.
+  const counts: Record<"grammar" | "deck", number> = { grammar: 0, deck: 0 };
   for (const turn of turns) {
     for (const marker of turn.markers) {
-      if (marker.kind === "new" || marker.kind === "grammar" || marker.kind === "deck") {
+      if (marker.kind === "grammar" || marker.kind === "deck") {
         counts[marker.kind] += 1;
       }
     }
@@ -602,10 +705,7 @@ function Rail({
           <span>Average answer time</span>
           <b>{meanMs === null ? "—" : `${Math.round(meanMs / 1000)}s`}</b>
         </div>
-        <div className="stat">
-          <span>New Words met</span>
-          <b>{counts.new}</b>
-        </div>
+        <WordSlots ledger={words} />
         <div className="stat">
           <span>Grammar Point uses</span>
           <b>{counts.grammar}</b>
@@ -649,6 +749,13 @@ function Rail({
             <span className="label">新</span>
           </span>
           <span>New Word — blue, dotted</span>
+        </div>
+        <div className="legend-row">
+          <span className="marker revisit sample">
+            お酒
+            <span className="label">再</span>
+          </span>
+          <span>Seen again — blue, solid</span>
         </div>
         <div className="legend-row">
           <span className="marker deck sample">

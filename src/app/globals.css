@@ -37,6 +37,17 @@
   --deck-soft: #13332f;
   --deck-ink: #b3ece2;
 
+  /* Revisit — the same blue as a New Word, drained. A revisit is a word the
+   * partner has used before in this session, so it belongs to the New Word family
+   * and must not be confused with a Deck Word, which is teal for a different
+   * reason. What separates them is weight rather than hue: a first meeting is the
+   * bright blue with a dotted underline, a second meeting is the same blue
+   * quieter, with a solid underline, because the learner's eye should land on it
+   * and then move on. */
+  --revisit: #4a9eff;
+  --revisit-soft: #101c2a;
+  --revisit-ink: #8fb4d8;
+
   --jp: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo,
     sans-serif;
   --ui: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;

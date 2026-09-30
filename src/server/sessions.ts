@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "./db";
 import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
+import { buildWordLedger } from "./words";
 import { buildDebrief } from "./debrief";
 import { clearDeckNaturals, getFumbleDeck, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
 import { getGrammarPoint, pickGrammarPoint } from "./grammarPoints";
@@ -302,6 +303,10 @@ export function getSessionState(id: string): SessionState | null {
     pacing: pacing(),
     fumbleDeck,
     fumbleDeckSize: fumbleDeck.length,
+    // The New Word budget, on the same terms as the deck: rebuilt from the
+    // committed turns so a reload shows the slots actually filled rather than
+    // ten empty pips and a learner wondering whether the session lost its work.
+    words: buildWordLedger(getTurns(id), sprints.length),
     furiganaOn: session.furiganaOn,
     revealedReadings: session.revealedReadings,
   };
@@ -418,8 +423,22 @@ export function openSprint(sessionId: string, seq: number, brief: SprintBrief, s
  * apart between them.
  */
 function closeSprint(sprint: Sprint, endedBy: SprintEnding, now: number): Debrief {
-  const spent = getTurns(sprint.sessionId).filter((t) => t.sprintId === sprint.id);
-  const debrief = buildDebrief(sprint, spent, endedBy, now);
+  const all = getTurns(sprint.sessionId);
+  const spent = all.filter((t) => t.sprintId === sprint.id);
+  // The ledger is built from the whole session rather than from this scene's turns,
+  // so `seenAgain` is not scoped to the scene. It is still bounded by the moment:
+  // the debrief is written at the boundary and stored, so a word needed again
+  // three scenes later does not retroactively change what this card said. That is
+  // deliberate — a debrief is a record of the sprint as it ended, and a card that
+  // rewrote itself afterwards would be reporting something that had not happened
+  // yet when the learner read it.
+  const debrief = buildDebrief(
+    sprint,
+    spent,
+    endedBy,
+    now,
+    buildWordLedger(all, getSprints(sprint.sessionId).length),
+  );
   db.prepare(
     `UPDATE sprint SET status = 'closed', ended_at = ?, ended_by = ?, debrief = ? WHERE id = ?`,
   ).run(now, endedBy, JSON.stringify(debrief), sprint.id);

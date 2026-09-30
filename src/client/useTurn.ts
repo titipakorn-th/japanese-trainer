@@ -143,6 +143,7 @@ export function useTurn(sessionId: string) {
                 status: event.status,
                 fumbleDeckSize: event.fumbleDeckSize,
                 fumbleDeck: event.fumbleDeck,
+                words: event.words,
               });
               result = {
                 ok: true,
