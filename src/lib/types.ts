@@ -7,7 +7,7 @@
  * never the truth.
  */
 
-export type MarkerKind = "new" | "fumble" | "grammar";
+export type MarkerKind = "new" | "fumble" | "grammar" | "deck";
 
 /**
  * An inline annotation pinned to a character range in a turn's text.
@@ -26,6 +26,8 @@ export interface Marker {
   example: string;
 }
 
+export type TurnKind = "normal" | "drill";
+
 export interface Turn {
   id: number;
   seq: number;
@@ -38,6 +40,14 @@ export interface Turn {
   naturalPhrasing: string | null;
   markers: Marker[];
   /**
+   * Partner turns only: a drill turn is the one case where the partner breaks
+   * character to make the learner retry a specific phrase. The drill natural
+   * form is what the partner is asking the learner to produce, and the next
+   * learner turn is the drill response.
+   */
+  kind: TurnKind;
+  drillNatural: string | null;
+  /**
    * Learner turns only: ms from the partner finishing its last line to the
    * learner submitting. The hesitation signal, and the reason it is measured in
    * the browser — the server cannot see when the text became readable.
@@ -48,13 +58,54 @@ export interface Turn {
 
 export type SessionStatus = "active" | "ended";
 
+/**
+ * The grammar pattern taught this session, picked to make the learner's
+ * sentences shorter.
+ *
+ * One per session, not per sprint — the partner is meant to use it across
+ * several turns so it lands as a pattern, not a memorised phrase. The point
+ * stays on the coach rail for the whole session so the learner can connect it
+ * to the moment they needed it.
+ */
+export interface GrammarPoint {
+  slug: string;
+  /** The pattern as written. Used in the prompt and on the rail. */
+  name: string;
+  level: "N4" | "N3";
+  /**
+   * What this pattern lets the learner express in one short sentence instead
+   * of two clumsy ones. The rationale the issue asks for.
+   */
+  shortens: string;
+  /**
+   * Why the pattern exists in plain language, not just what its form is.
+   * Shown on the coach rail alongside a concrete example.
+   */
+  why: string;
+  /** A concrete example sentence using the pattern. */
+  example: string;
+}
+
 export interface Session {
   id: string;
   createdAt: number;
   endedAt: number | null;
   /** The scenario family this session was drawn from. */
   scenario: Scenario;
+  /**
+   * The one grammar point chosen for this session. Null only on a session
+   * recorded before the grammar-point slice existed; fresh sessions always
+   * have one.
+   */
+  grammarPoint: GrammarPoint | null;
   status: SessionStatus;
+  /**
+   * Whether the learner has turned furigana on for this session. The default is
+   * off, on purpose — a reading aid that is always on measures the app's data
+   * rather than the learner's reading, and that habit is hard to reverse. Once
+   * on, it stays on until the session ends.
+   */
+  furiganaOn: boolean;
 }
 
 /**
@@ -128,6 +179,15 @@ export type FumbleReason = "abandoned" | "compressed" | "hedged" | "wrong-form";
  * inline marker is rendered; the moment is still on the deck. `natural` is the form
  * the learner was reaching for and is the deck key: the same `会計` covers a learner
  * who said `billing`, `bill`, or `チェック`.
+ *
+ * `drilled` is true once the partner has asked the learner to retry this word and
+ * the learner produced it on the retry. A deck entry that mixes drilled and
+ * non-drilled moments tells the learner where they still have work to do.
+ *
+ * `clearedAt` is when the learner produced the word unprompted in a later
+ * conversation. A cleared moment leaves the deck — the deck the rail shows is
+ * `cleared_at IS NULL` — but the row stays so the moment is still readable from
+ * the deck's history.
  */
 export interface Fumble {
   id: string;
@@ -140,6 +200,8 @@ export interface Fumble {
   sprintId: string | null;
   turnId: number | null;
   createdAt: number;
+  drilled: boolean;
+  clearedAt: number | null;
 }
 
 /**
@@ -222,6 +284,8 @@ export interface SessionState {
   fumbleDeck: FumbleDeckEntry[];
   /** Distinct natural forms the learner has fumbled so far. The "deck count". */
   fumbleDeckSize: number;
+  /** The session's furigana preference as the server holds it. */
+  furiganaOn: boolean;
 }
 
 /** The turn budgets and clocks a session runs on. See `pacing.ts`. */
@@ -250,6 +314,13 @@ export interface Committed {
    * actually earned.
    */
   fumbleDeckSize: number;
+  /**
+   * The deck as it stands after this commit, worst offenders first. The rail
+   * shows it during the session so the learner knows which words to aim for
+   * and sees the list shrink as words get cleared. Reloading mid-session reads
+   * the same list from the server.
+   */
+  fumbleDeck: FumbleDeckEntry[];
 }
 
 /** Frames sent over the turn stream, in order. */

@@ -21,6 +21,12 @@ import type { FumbleReason, Marker, MarkerKind } from "@/lib/types";
  * separately on the Fumble Deck — but they share the streaming shape so the same
  * call still produces everything the app needs to show. The deck is what makes
  * silent regressions visible.
+ *
+ * Drill rides alongside them. A drill is the one case where the partner breaks
+ * character to ask the learner to retry a phrase, so its decision belongs in the
+ * same block — the model has just classified the fumbles, and naming the one
+ * worth interrupting over is a continuation of that judgement, not a separate
+ * step.
  */
 
 const FENCE = "```";
@@ -39,6 +45,30 @@ export interface ParsedReply {
    * abandoned turn — the deck still gains the moment, no marker is rendered.
    */
   fumbles: ParsedFumble[];
+  /**
+   * A drill the model has decided to issue, or null. The natural form is what
+   * the partner is asking the learner to retry — a Japanese phrase that should
+   * already appear as the `natural` field of one of the fumbles just reported.
+   * A drill with no matching fumble is preserved rather than dropped: the
+   * partner chose to break character for it, and erasing the decision would
+   * discard the only signal the model had for how much it wanted this.
+   */
+  drill: ParsedDrill | null;
+  /**
+   * Deck words the learner just produced unprompted, as their natural forms.
+   *
+   * Each entry matches a deck `natural` exactly. An empty array is the common
+   * case; a non-empty array triggers the deck-clearance write inside the turn
+   * transaction so the rail shrinks visibly on the same commit.
+   *
+   * Empty for the opening turn (the learner has not spoken) and for any turn
+   * whose metadata block the model dropped.
+   */
+  produced: string[];
+}
+
+export interface ParsedDrill {
+  natural: string;
 }
 
 export interface ParsedFumble {
@@ -61,7 +91,15 @@ interface RawFumble {
   reason?: unknown;
 }
 
-const KINDS: ReadonlySet<string> = new Set<MarkerKind>(["new", "fumble", "grammar"]);
+interface RawDrill {
+  natural?: unknown;
+}
+
+interface RawProduced {
+  natural?: unknown;
+}
+
+const KINDS: ReadonlySet<string> = new Set<MarkerKind>(["new", "fumble", "grammar", "deck"]);
 
 const REASONS: ReadonlySet<string> = new Set<FumbleReason>([
   "abandoned",
@@ -223,12 +261,54 @@ function parseFumbles(raw: unknown): ParsedFumble[] {
 }
 
 /**
+ * The drill the model decided to issue, or null.
+ *
+ * A drill is `{"natural": "..."}` with the natural form in Japanese. A missing
+ * `natural` or a non-string one drops the drill, because the only thing the
+ * drill field carries is what to retry. A model that decides to drill but
+ * leaves the natural blank has not finished the decision, and discarding it
+ * costs less than a drill the renderer cannot display.
+ */
+function parseDrill(raw: unknown): ParsedDrill | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const obj = raw as RawDrill;
+  const natural = str(obj?.natural);
+  if (!natural) return null;
+  return { natural };
+}
+
+/**
+ * The deck words the learner produced unprompted, as their natural forms.
+ *
+ * Each entry is a Japanese phrase that should match a `natural` field already on
+ * the Fumble Deck. A non-string or empty natural is dropped rather than trusted:
+ * the deck-clearance write keys on it exactly, and a phantom entry would clear
+ * nothing while looking like it cleared something.
+ *
+ * Duplicates are collapsed: two model calls clearing the same word in one turn is
+ * a single deck-shrink event, and the rail counts it once.
+ */
+function parseProduced(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  for (const item of raw as RawProduced[]) {
+    const natural = str(item?.natural);
+    if (!natural) continue;
+    seen.add(natural);
+  }
+  return [...seen];
+}
+
+/**
  * Turn a completed stream into a displayable turn.
  *
  * A missing or malformed metadata block is not a failure. The turn still
  * happened; it just arrives without inline markers. Failing here would throw
- * away a good exchange over a cosmetic defect. The same applies to fumbles: a
- * turn with no fumble block is a turn with no fumbles, not a turn that broke.
+ * away a good exchange over a cosmetic defect. The same applies to fumbles and
+ * drills: a turn with no fumble block is a turn with no fumbles, not a turn
+ * that broke, and a turn with no drill block is a turn that did not drill. A turn
+ * with no `produced` block is a turn that produced no deck words, which is the
+ * common case and is not a failure either.
  */
 export function parseReply(raw: string, whatLearnerSaid: string | null = null): ParsedReply {
   const { prose, correction, metadata } = splitReply(raw);
@@ -236,7 +316,7 @@ export function parseReply(raw: string, whatLearnerSaid: string | null = null): 
   const natural = naturalPhrasingFor(correction?.trim() ?? "", whatLearnerSaid, text);
 
   if (metadata === null) {
-    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [], drill: null, produced: [] };
   }
 
   // The fence is followed by a language tag on some responses.
@@ -246,18 +326,20 @@ export function parseReply(raw: string, whatLearnerSaid: string | null = null): 
   try {
     parsed = JSON.parse(end >= 0 ? body.slice(0, end) : body);
   } catch {
-    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [], drill: null, produced: [] };
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    return { text, naturalPhrasing: natural, markers: [], fumbles: [] };
+    return { text, naturalPhrasing: natural, markers: [], fumbles: [], drill: null, produced: [] };
   }
 
-  const obj = parsed as { markers?: unknown; fumbles?: unknown };
+  const obj = parsed as { markers?: unknown; fumbles?: unknown; drill?: unknown; produced?: unknown };
   return {
     text,
     naturalPhrasing: natural,
     markers: parseMarkers(text, obj.markers),
     fumbles: parseFumbles(obj.fumbles),
+    drill: parseDrill(obj.drill),
+    produced: parseProduced(obj.produced),
   };
 }

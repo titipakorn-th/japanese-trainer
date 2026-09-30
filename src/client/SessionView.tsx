@@ -8,9 +8,43 @@ import { SprintTrack } from "./SprintTrack";
 import { StreamedText } from "./StreamedText";
 import { useTurn } from "./useTurn";
 import { meanResponseMs } from "@/lib/measure";
-import type { Debrief, SessionState, Sprint, Turn } from "@/lib/types";
+import type { Debrief, FumbleDeckEntry, GrammarPoint, SessionState, Sprint, Turn } from "@/lib/types";
 
 const BUDGET_MS = 900;
+
+/**
+ * Where the per-session reveal set is parked.
+ *
+ * The revealed words are a UI interaction state — they belong with the browser
+ * rather than the database. sessionStorage (not localStorage) is the right
+ * scope: the set survives a reload within the same tab, and dies with the tab,
+ * which is the same lifetime as "the rest of the session" the learner is in.
+ */
+const REVEALED_KEY_PREFIX = "japanese-trainer:revealed:";
+
+function loadRevealed(sessionId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.sessionStorage.getItem(REVEALED_KEY_PREFIX + sessionId);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((s): s is string => typeof s === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveRevealed(sessionId: string, set: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(REVEALED_KEY_PREFIX + sessionId, JSON.stringify([...set]));
+  } catch {
+    // sessionStorage full or disabled: degrade silently. The reveal still holds
+    // for the rest of this session viewing; only the cross-reload persistence
+    // is lost.
+  }
+}
 
 /**
  * The conversation surface.
@@ -49,9 +83,42 @@ export function SessionView({ initial }: { initial: SessionState }) {
    * mid-session.
    */
   const [deckSize, setDeckSize] = useState<number>(initial.fumbleDeckSize);
+  /**
+   * The deck entries as they stood when the page was rendered, and as the server
+   * reports them after each commit. The rail lists the natural forms so the
+   * learner knows which words to aim for, and the list shrinks as entries get
+   * cleared.
+   */
+  const [deck, setDeck] = useState<FumbleDeckEntry[]>(initial.fumbleDeck);
   /** What the in-flight turn is for, so Retry can repeat it. */
   const [attempt, setAttempt] = useState<string | null>(null);
   const openedFor = useRef<string | null>(null);
+  /**
+   * The session's furigana toggle. The server's value is the source of truth on
+   * first render, so a reload resumes into the same state. Subsequent flips go
+   * through the PATCH endpoint and optimistically update this state before the
+   * round-trip completes.
+   */
+  const [furiganaOn, setFuriganaOn] = useState<boolean>(initial.furiganaOn);
+  /**
+   * Surface forms the learner has already tapped to reveal. Loaded from
+   * sessionStorage keyed on the session id, so a reload of the same session
+   * keeps the revealed words and a switch to a different session keeps a
+   * clean slate. A `ref` is held around it so `reveal` is a stable callback and
+   * AnnotatedText is not re-rendered on every tap.
+   */
+  const revealedRef = useRef<Set<string>>(loadRevealed(session.id));
+  const [, forceRender] = useState(0);
+  const reveal = useCallback(
+    (surface: string) => {
+      const set = revealedRef.current;
+      if (set.has(surface)) return;
+      set.add(surface);
+      saveRevealed(session.id, set);
+      forceRender((n) => n + 1);
+    },
+    [session.id],
+  );
 
   const { stream, send, clearFailure } = useTurn(session.id);
   const busy = stream.phase === "streaming";
@@ -60,6 +127,22 @@ export function SessionView({ initial }: { initial: SessionState }) {
   const debriefs = new Map<number, Debrief>(
     sprints.flatMap((s) => (s.debrief ? [[s.debrief.afterSeq, s.debrief] as const] : [])),
   );
+
+  /**
+   * Whether the last partner turn was a drill awaiting the learner's response.
+   *
+   * A drill partner turn carries `kind: "drill"` and a `drillNatural`. The
+   * learner is expected to type the natural form back, which is what the
+   * server's drill-success check is looking for. While a drill is pending the
+   * composer stays enabled even if no sprint is active — the boundary drill
+   * lives between the closing of one scene and the opening of the next, and
+   * the learner is supposed to be able to respond to it during that gap.
+   */
+  const lastPartnerTurn = [...turns].reverse().find((t) => t.role === "partner");
+  const pendingDrill = lastPartnerTurn?.kind === "drill" ? lastPartnerTurn : null;
+  // The composer stays open while a drill is pending, even when the session
+  // would otherwise read as ended — the drill response is the next event.
+  const composerOpen = !ended || pendingDrill !== null;
 
   const run = useCallback(
     async (text: string | null) => {
@@ -84,11 +167,13 @@ export function SessionView({ initial }: { initial: SessionState }) {
         setAttempt(null);
         setDraft("");
         setLatency(result.firstSentenceMs);
-        // Each commit reports the deck size after it landed, so the rail grows
-        // only when a fumble actually added a new word. The number the learner
-        // sees is the number the database has.
-        const finalSize = result.committed[result.committed.length - 1]!.fumbleDeckSize;
-        setDeckSize(finalSize);
+        // Each commit reports the deck size and entries after it landed, so the rail
+        // grows only when a fumble actually added a new word and shrinks only
+        // when the learner produced one. The number the learner sees is the
+        // number the database has, and so are the words on the list.
+        const lastCommit = result.committed[result.committed.length - 1]!;
+        setDeckSize(lastCommit.fumbleDeckSize);
+        setDeck(lastCommit.fumbleDeck);
       } else {
         // The conversation did not advance. The draft was never touched, so the
         // typed text is still in the field, ready to retry.
@@ -110,9 +195,14 @@ export function SessionView({ initial }: { initial: SessionState }) {
 
   const submit = useCallback(() => {
     const text = draft.trim();
-    if (!text || busy || ended) return;
+    if (!text || busy) return;
+    // A pending drill keeps the composer open even after the session has read
+    // as ended: the drill response is the next event, and rejecting it because
+    // the boundary has already committed would leave the learner staring at a
+    // drill prompt with no way to answer it.
+    if (ended && !pendingDrill) return;
     void run(text);
-  }, [draft, busy, ended, run]);
+  }, [draft, busy, ended, pendingDrill, run]);
 
   const retry = useCallback(() => {
     if (busy) return;
@@ -122,6 +212,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
 
   const end = useCallback(async () => {
     if (busy) return;
+    if (pendingDrill) return;
     setAbandoned(true);
     const response = await fetch(`/api/sessions/${session.id}`, { method: "DELETE" });
     if (!response.ok) {
@@ -133,7 +224,44 @@ export function SessionView({ initial }: { initial: SessionState }) {
     setActive(null);
     setTurns(state.turns);
     setEnded(true);
-  }, [busy, session.id]);
+  }, [busy, pendingDrill, session.id]);
+
+  /**
+   * Flip the session's furigana preference.
+   *
+   * The server's PATCH is the source of truth — flipping it before the request
+   * returns lets the UI feel instant, and on a 404 (the session ended while the
+   * learner was looking at it) we revert to whatever the server last said. The
+   * revealed set is unaffected: switching modes never un-reveals a word the
+   * learner has already checked, so the action is symmetric.
+   */
+  const toggleFurigana = useCallback(async () => {
+    const next = !furiganaOn;
+    setFuriganaOn(next);
+    try {
+      const response = await fetch(`/api/sessions/${session.id}/furigana`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on: next }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        // The toggle silently reverts when the session has ended; surfacing a
+        // banner here would interrupt the conversation for a non-actionable
+        // state change.
+        if (response.status !== 404) {
+          setFuriganaOn(!next);
+          throw new Error(data.error ?? `HTTP ${response.status}`);
+        }
+      }
+    } catch (err) {
+      setFuriganaOn(!next);
+      // The toggle is one button; the failure is most likely offline. Let it
+      // go for now — the conversation can survive a momentary mis-state and the
+      // learner can tap again.
+      console.error("furigana toggle failed:", err);
+    }
+  }, [furiganaOn, session.id]);
 
   const totalTurns = turns.filter((t) => t.role === "learner").length;
   const average = meanResponseMs(turns);
@@ -148,13 +276,14 @@ export function SessionView({ initial }: { initial: SessionState }) {
           </div>
           <SprintTrack sprints={sprints} />
           <div className="grow" />
+          <FuriganaToggle on={furiganaOn} onToggle={toggleFurigana} disabled={ended && !pendingDrill} />
           <LatencyChip ms={latency} live={busy} />
-          {ended ? (
+          {ended && !pendingDrill ? (
             <Link className="quit" href="/">
               New session
             </Link>
           ) : (
-            <EndButton onEnd={end} busy={busy} />
+            <EndButton onEnd={end} busy={busy} disabled={pendingDrill !== null} />
           )}
         </header>
 
@@ -164,9 +293,12 @@ export function SessionView({ initial }: { initial: SessionState }) {
           pendingLearner={pendingLearner}
           stream={stream.text}
           busy={busy}
+          furiganaOn={furiganaOn}
+          revealed={revealedRef.current}
+          onReveal={reveal}
         />
 
-        {ended ? (
+        {ended && !pendingDrill ? (
           <div className="wrap">
             <h2>{wrapTitle(noScene, abandoned)}</h2>
             {noScene ? (
@@ -192,7 +324,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
             </Link>
           </div>
         ) : (
-          <div className="composer">
+          <div className="composer" data-drill={pendingDrill ? "1" : "0"}>
             {stream.failure ? (
               <div className="failure" role="alert">
                 <span className="grow">
@@ -216,8 +348,8 @@ export function SessionView({ initial }: { initial: SessionState }) {
                 rows={1}
                 value={draft}
                 disabled={busy}
-                placeholder="日本語で返信…"
-                aria-label="Reply in Japanese"
+                placeholder={pendingDrill ? "もう一度言ってみましょう…" : "日本語で返信…"}
+                aria-label={pendingDrill ? "Drill response in Japanese" : "Reply in Japanese"}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -231,14 +363,15 @@ export function SessionView({ initial }: { initial: SessionState }) {
               </button>
             </div>
             <div className="hint">
-              Enter to send, Shift+Enter for a new line. Nothing enters the transcript until the
-              partner answers.
+              {pendingDrill
+                ? "Say the phrase back to clear it from the deck. The partner is waiting on the retry."
+                : "Enter to send, Shift+Enter for a new line. Nothing enters the transcript until the partner answers."}
             </div>
           </div>
         )}
       </div>
 
-      <Rail sprints={sprints} turns={turns} latency={latency} deckSize={deckSize} />
+      <Rail sprints={sprints} turns={turns} latency={latency} deckSize={deckSize} deck={deck} grammarPoint={session.grammarPoint} />
     </div>
   );
 }
@@ -249,7 +382,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
  * worth a modal asking about. The second click is the confirmation, and the panel
  * that replaces the composer says plainly that the work was kept.
  */
-function EndButton({ onEnd, busy }: { onEnd: () => void; busy: boolean }) {
+function EndButton({ onEnd, busy, disabled }: { onEnd: () => void; busy: boolean; disabled?: boolean }) {
   const [asking, setAsking] = useState(false);
 
   useEffect(() => {
@@ -257,6 +390,12 @@ function EndButton({ onEnd, busy }: { onEnd: () => void; busy: boolean }) {
     const timer = setTimeout(() => setAsking(false), 5000);
     return () => clearTimeout(timer);
   }, [asking]);
+
+  // A pending drill is the only state where the End button hides: the drill
+  // response is the next event in the session, and abandoning before answering
+  // it would leave a deck entry half-cleared. The drill clears itself on the
+  // server when the learner submits, so the button comes back on the next paint.
+  if (disabled) return null;
 
   if (!asking) {
     return (
@@ -292,18 +431,50 @@ function LatencyChip({ ms, live }: { ms: number | null; live: boolean }) {
   );
 }
 
+/**
+ * The session-wide reading-aid toggle.
+ *
+ * Off by default — a reading aid that is always on measures the app's data
+ * rather than the learner's reading. The chip makes the current state visible
+ * at a glance so the learner does not have to wonder whether a tap-target kanji
+ * is the app offering help or the app hiding something.
+ */
+function FuriganaToggle({ on, onToggle, disabled }: { on: boolean; onToggle: () => void; disabled: boolean }) {
+  return (
+    <button
+      type="button"
+      className="furi-toggle"
+      data-on={on ? "1" : "0"}
+      aria-pressed={on}
+      aria-label={on ? "Turn furigana off for this session" : "Turn furigana on for this session"}
+      onClick={onToggle}
+      disabled={disabled}
+    >
+      <span className="led" aria-hidden="true" />
+      <span className="label">読み方</span>
+      <span className="state">{on ? "on" : "off"}</span>
+    </button>
+  );
+}
+
 function Feed({
   turns,
   debriefs,
   pendingLearner,
   stream,
   busy,
+  furiganaOn,
+  revealed,
+  onReveal,
 }: {
   turns: Turn[];
   debriefs: Map<number, Debrief>;
   pendingLearner: string | null;
   stream: string;
   busy: boolean;
+  furiganaOn: boolean;
+  revealed: ReadonlySet<string>;
+  onReveal: (surface: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const count = turns.length;
@@ -321,11 +492,26 @@ function Feed({
     <div className="feed" ref={ref}>
       {turns.map((turn) => (
         <div key={turn.id} className="exchange">
-          <article className={`turn ${turn.role}`}>
+          <article
+            className={`turn ${turn.role}${turn.kind === "drill" ? " drill" : ""}`}
+            data-kind={turn.kind}
+          >
             <div className="who">{turn.role === "partner" ? "Partner" : "You"}</div>
+            {turn.kind === "drill" ? (
+              <div className="drill-label">drill — say it again</div>
+            ) : null}
             <div className="bubble jp">
-              <AnnotatedText text={turn.text} markers={turn.markers} />
+              <AnnotatedText
+                text={turn.text}
+                markers={turn.markers}
+                furiganaOn={furiganaOn}
+                revealed={revealed}
+                onReveal={onReveal}
+              />
             </div>
+            {turn.kind === "drill" && turn.drillNatural ? (
+              <div className="drill-target jp">「{turn.drillNatural}」</div>
+            ) : null}
             {turn.naturalPhrasing ? (
               <div className="quiet">
                 <span className="label">natural</span>
@@ -373,16 +559,22 @@ function Rail({
   turns,
   latency,
   deckSize,
+  deck,
+  grammarPoint,
 }: {
   sprints: Sprint[];
   turns: Turn[];
   latency: number | null;
   deckSize: number;
+  deck: FumbleDeckEntry[];
+  grammarPoint: GrammarPoint | null;
 }) {
-  const counts: Record<"new" | "grammar", number> = { new: 0, grammar: 0 };
+  const counts: Record<"new" | "grammar" | "deck", number> = { new: 0, grammar: 0, deck: 0 };
   for (const turn of turns) {
     for (const marker of turn.markers) {
-      if (marker.kind === "new" || marker.kind === "grammar") counts[marker.kind] += 1;
+      if (marker.kind === "new" || marker.kind === "grammar" || marker.kind === "deck") {
+        counts[marker.kind] += 1;
+      }
     }
   }
   const learner = turns.filter((t) => t.role === "learner");
@@ -422,6 +614,20 @@ function Rail({
           <span>Fumble Deck</span>
           <b>{deckSize}</b>
         </div>
+        {deck.length > 0 ? (
+          <ul className="deck-list" aria-label="Deck words to produce this session">
+            {deck.map((entry) => (
+              <li key={entry.natural} className="deck-chip jp">
+                <span className="surface">{entry.natural}</span>
+                {entry.count > 1 ? <span className="count">×{entry.count}</span> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="stat">
+          <span>Deck Word meets</span>
+          <b>{counts.deck}</b>
+        </div>
         {next ? (
           <p className="note">
             Next up: <span className="jp">{next.brief.persona}</span>
@@ -445,6 +651,13 @@ function Rail({
           <span>New Word — blue, dotted</span>
         </div>
         <div className="legend-row">
+          <span className="marker deck sample">
+            会計
+            <span className="label">戻</span>
+          </span>
+          <span>Deck Word — teal, dashed</span>
+        </div>
+        <div className="legend-row">
           <span className="marker fumble sample">
             それ
             <span className="label">△</span>
@@ -460,6 +673,23 @@ function Rail({
         </div>
         <p className="note">Tap any marker for its reading, meaning, and an example.</p>
       </div>
+
+      {grammarPoint ? (
+        <div className="card grammar-point">
+          <h2>Grammar Point</h2>
+          <div className="gp-pattern jp">{grammarPoint.name}</div>
+          <p className="gp-why">{grammarPoint.why}</p>
+          <div className="gp-shortens">{grammarPoint.shortens}</div>
+          <p className="gp-example">
+            <span className="label">例</span>
+            <span className="jp">{grammarPoint.example}</span>
+          </p>
+          <p className="note">
+            Used {counts.grammar} {counts.grammar === 1 ? "time" : "times"} so far this session. The
+            partner will use it across several more turns in different sentences.
+          </p>
+        </div>
+      ) : null}
     </aside>
   );
 }

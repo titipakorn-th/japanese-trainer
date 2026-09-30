@@ -10,16 +10,26 @@ import { readStance, type Spoken, type Stance } from "./stance";
 import { closeSprint, sessionExpired, pacing } from "./pacing";
 import {
   commitBoundary,
+  commitDrillResponse,
   commitExchange,
+  findPendingDrillSprint,
   getActiveSprint,
   getSession,
   getSprints,
   getTurns,
+  openSprint,
   type NewTurn,
 } from "./sessions";
-import { insertFumbles, getFumbleDeckSize, type DetectedFumble } from "./fumbles";
+import {
+  clearDeckNaturals,
+  getFumbleDeck,
+  getFumbleDeckSize,
+  insertFumbles,
+  worstFumbleForSprint,
+  type DetectedFumble,
+} from "./fumbles";
 import { fumbleMarkers } from "./fumbleMarkers";
-import type { Marker, Sprint, SprintEnding, Turn, TurnEvent } from "@/lib/types";
+import type { Marker, SessionStatus, Sprint, SprintEnding, Turn, TurnEvent } from "@/lib/types";
 import { firstSentenceEnd } from "@/lib/sentences";
 
 /**
@@ -106,6 +116,41 @@ function earlierGoals(sprints: Sprint[], before: number): string[] {
     .slice(-3);
 }
 
+/**
+ * The deck words this turn is targeting, as their natural forms.
+ *
+ * Read fresh each call so a word cleared by the previous turn's `produced` field
+ * stops being engineered into the partner's reply. The deck is the only signal
+ * the learner has that progress is being made on their weak words, and an
+ * already-cleared word staying in the prompt is the same regression as a fumble
+ * the model stopped reporting — silence on a fix is the worst place to regress.
+ */
+function activeDeckWords(): string[] {
+  return getFumbleDeck().map((entry) => entry.natural);
+}
+
+/**
+ * The line the partner says when asking the learner to retry a specific phrase.
+ *
+ * Templated rather than model-generated: the drill has to happen in the same
+ * request as the closing line, and adding another model call to the boundary
+ * would double its latency. The template also makes the cost of a drill visible
+ * — every drill follows the same shape, and a learner who has seen one knows
+ * what the partner is about to ask before the sentence finishes.
+ *
+ * The surface is included when it differs from the natural form, so a learner
+ * who reached for the English word gets a single sentence that names the word
+ * they used and the word they should have used. The model name is omitted
+ * deliberately: a fumble may not have a surface (an abandoned turn has nothing
+ * to highlight), and adding `「」` around the natural form is the only thing
+ * the renderer needs to read it correctly.
+ */
+function drillPromptLine(natural: string, surface: string | null): string {
+  const useSurface = surface && surface.trim() && surface.trim() !== natural.trim();
+  const phrase = useSurface ? `${surface}じゃなくて、${natural}` : natural;
+  return `あ、${phrase}ですね、もう一度お願いします。`;
+}
+
 export async function runTurn(
   sessionId: string,
   input: TurnInput,
@@ -122,6 +167,35 @@ export async function runTurn(
     return;
   }
 
+  const learnerText = input.text;
+  const responseMs = cleanResponseMs(input.responseMs);
+
+  /**
+   * A drill response is the one place a learner input arrives while no sprint is
+   * active. The previous partner turn carries a `drill_natural`, the session is
+   * between sprints (or in the middle of one whose last line was a drill), and
+   * the learner is answering the drill rather than continuing the conversation.
+   * Detecting it here, before the `getActiveSprint` check, is what lets the
+   * composer accept text on a session that has no live scene.
+   */
+  const allTurns = getTurns(sessionId);
+  const lastPartnerTurn = [...allTurns].reverse().find((t) => t.role === "partner");
+  const pendingDrillSprint =
+    lastPartnerTurn?.kind === "drill" && learnerText !== null
+      ? findPendingDrillSprint(sessionId)
+      : null;
+  if (pendingDrillSprint && learnerText !== null) {
+    await handleDrillResponse(
+      sessionId,
+      pendingDrillSprint,
+      learnerText,
+      responseMs,
+      emit,
+      clientSignal,
+    );
+    return;
+  }
+
   const sprint = getActiveSprint(sessionId);
   if (!sprint) {
     emit({ t: "error", message: "This session has no scene to play.", retryable: false });
@@ -129,10 +203,6 @@ export async function runTurn(
   }
 
   const sprints = getSprints(sessionId);
-  const learnerText = input.text;
-  const responseMs = cleanResponseMs(input.responseMs);
-
-  const allTurns = getTurns(sessionId);
   const inSprint = allTurns.filter((t) => t.sprintId === sprint.id);
   const learnerTurns = inSprint.filter((t) => t.role === "learner").length;
 
@@ -258,6 +328,8 @@ export async function runTurn(
           moment: (opening && learnerText === null ? "opening" : "reply") as Moment,
           stance,
           earlier: earlierGoals(sprints, sprint.seq),
+          deckWords: activeDeckWords(),
+          grammarPoint: session.grammarPoint,
         },
         inSprint,
         learnerText ?? "（学習者が来た）",
@@ -278,10 +350,28 @@ export async function runTurn(
       const { learnerTurn: written, partnerTurn } = commitExchange(
         sessionId,
         learnerText === null ? null : learnerTurn(learnerText, parsed.naturalPhrasing, parsed.fumbles),
-        { role: "partner", text: parsed.text, naturalPhrasing: null, markers: parsed.markers },
+        {
+          role: "partner",
+          text: parsed.text,
+          naturalPhrasing: null,
+          markers: parsed.markers,
+          // A model-issued drill on a fumble the model just reported. The next
+          // learner turn is the drill response, which `runTurn` will detect and
+          // route through `handleDrillResponse`. Without this field the drill
+          // would be committed as a normal turn and the partner would have
+          // broken character without the transcript knowing it.
+          drillNatural: parsed.drill?.natural ?? null,
+        },
         sprint,
         capture,
       );
+
+      // Deck clearance is the second half of the deck lifecycle. The model just
+      // reported which deck words the learner produced naturally; clearing them
+      // here, right after the turn commits, keeps the rail honest — the size
+      // the learner reads off the next frame is the size that landed on disk.
+      if (parsed.produced.length > 0) clearDeckNaturals(parsed.produced);
+      const fumbleDeck = getFumbleDeck();
 
       emit({
         t: "done",
@@ -291,7 +381,8 @@ export async function runTurn(
         sprint,
         debrief: null,
         status: "active",
-        fumbleDeckSize: getFumbleDeckSize(),
+        fumbleDeckSize: fumbleDeck.length,
+        fumbleDeck,
       });
       return;
     }
@@ -308,7 +399,14 @@ export async function runTurn(
     const line = learnerText ?? "（学習者が来た）";
 
     const closing = await ask(
-      { brief: sprint.brief, moment: "closing", stance: "plain", earlier: earlierGoals(sprints, sprint.seq) },
+      {
+        brief: sprint.brief,
+        moment: "closing",
+        stance: "plain",
+        earlier: earlierGoals(sprints, sprint.seq),
+        deckWords: activeDeckWords(),
+        grammarPoint: session.grammarPoint,
+      },
       history,
       line,
     );
@@ -321,6 +419,8 @@ export async function runTurn(
             moment: "opening",
             stance: "plain",
             earlier: earlierGoals(sprints, sprint.seq + 1),
+            deckWords: activeDeckWords(),
+            grammarPoint: session.grammarPoint,
           },
           [],
           "（学習者が来た）",
@@ -340,6 +440,28 @@ export async function runTurn(
         ? { detected: closing.fumbles, situation: closingSituation, learnerSaid: learnerText }
         : null;
 
+    /**
+     * Sprint-end drill on the worst fumble of the closing scene.
+     *
+     * The drill is the only piece of the boundary that depends on something
+     * other than the model call — it is computed from the fumble table, not
+     * from the partner's reply. This is the deliberate choice: the closing
+     * call is already what the partner said; deciding what to drill is a
+     * separate judgement that should not ride the same call.
+     *
+     * No drill is issued when there is no fumble, or when the session clock
+     * is what ended the sprint (the closing line of a session-clock ending
+     * does not invite a retry — the session is over). Otherwise we issue
+     * exactly one drill, on the freshest uncleared fumble.
+     */
+    const worstFumble = endedBy === "session-clock" ? null : worstFumbleForSprint(sprint.id);
+    const drill = worstFumble
+      ? {
+          text: drillPromptLine(worstFumble.natural, worstFumble.surface || null),
+          natural: worstFumble.natural,
+        }
+      : null;
+
     const result = commitBoundary(sessionId, sprint, {
       learner: learnerText === null ? null : learnerTurn(learnerText, closing.naturalPhrasing, closing.fumbles),
       closing: { role: "partner", text: closing.text, naturalPhrasing: null, markers: closing.markers },
@@ -349,10 +471,15 @@ export async function runTurn(
         ? { role: "partner", text: opening.text, naturalPhrasing: null, markers: opening.markers }
         : null,
       fumbles: fumbleCapture,
+      drill,
     });
 
+    // The closing learner's turn can produce a deck word too. Clearing after the
+    // boundary commits so the size the rail shows is the one that landed.
+    if (closing.produced.length > 0) clearDeckNaturals(closing.produced);
+
     const status = result.nextSprint ? "active" : "ended";
-    const deckSize = getFumbleDeckSize();
+    const fumbleDeck = getFumbleDeck();
     emit({
       t: "done",
       learnerTurn: result.learnerTurn,
@@ -367,8 +494,29 @@ export async function runTurn(
       },
       debrief: result.debrief,
       status,
-      fumbleDeckSize: deckSize,
+      fumbleDeckSize: fumbleDeck.length,
+      fumbleDeck,
     });
+
+    if (result.drillTurn) {
+      emit({
+        t: "done",
+        learnerTurn: null,
+        turn: result.drillTurn,
+        firstSentenceMs: Date.now() - started,
+        sprint: {
+          ...sprint,
+          status: "closed",
+          endedAt: result.debrief.endedAt,
+          endedBy,
+          debrief: result.debrief,
+        },
+        debrief: result.debrief,
+        status,
+        fumbleDeckSize: fumbleDeck.length,
+        fumbleDeck,
+      });
+    }
 
     if (result.nextSprint && result.openingTurn) {
       emit({
@@ -379,7 +527,8 @@ export async function runTurn(
         sprint: result.nextSprint,
         debrief: null,
         status,
-        fumbleDeckSize: deckSize,
+        fumbleDeckSize: fumbleDeck.length,
+        fumbleDeck,
       });
     }
   } catch (err) {
@@ -405,4 +554,235 @@ export async function runTurn(
       retryable: err instanceof ModelError ? err.retryable : true,
     });
   }
+}
+
+/**
+ * One drill response: commit the learner turn, evaluate success, then continue
+ * the conversation in the right place.
+ *
+ * The drill belongs to one of two contexts:
+ *
+ * - **Mid-conversation drill**: the drill partner turn is the last turn of the
+ *   active sprint. The continuation is a normal partner reply in the same
+ *   scene, prompted by the same model call architecture as any other reply.
+ * - **Sprint-end drill**: the drill partner turn is the last turn of a closed
+ *   sprint, issued at the boundary so the worst fumble of the scene got one
+ *   immediate retry. The continuation is the next sprint's opening line, run
+ *   as its own scene.
+ *
+ * Distinguishing the two is just a matter of which sprint row holds the drill
+ * partner turn. A closed sprint means the drill was the boundary drill; the
+ * next call has to be an opening, not a reply.
+ */
+async function handleDrillResponse(
+  sessionId: string,
+  drillSprint: Sprint,
+  learnerText: string,
+  responseMs: number | null,
+  emit: (event: TurnEvent) => void,
+  clientSignal: AbortSignal,
+): Promise<void> {
+  const sprints = getSprints(sessionId);
+  const isSprintEnd = drillSprint.status === "closed";
+
+  const started = Date.now();
+  const timeout = AbortSignal.timeout(modelTimeoutMs());
+  const signal = AbortSignal.any([timeout, clientSignal]);
+
+  /** Deltas for the partner continuation that follows the drill response. */
+  let sent = 0;
+  let shownSentence = false;
+  let firstSentenceMs: number | null = null;
+
+  // The drill response itself commits first, before any model call. A failed
+  // model call must not lose the learner's typed answer — they have already
+  // answered, the transcript owes them the row.
+  const { learnerTurn: written, drilled } = commitDrillResponse(
+    sessionId,
+    drillSprint.id,
+    learnerText,
+    responseMs,
+  );
+  const fumbleDeck = getFumbleDeck();
+
+  /**
+   * Pick the sprint the partner's continuation belongs to.
+   *
+   * Mid-conversation drill: the same sprint that held the drill partner turn.
+   * The continuation is a normal reply in the same scene — the model has just
+   * been asked to break character briefly and is back in role now.
+   *
+   * Sprint-end drill: the next scene. Opening it here means the drill response
+   * and the next opening are read by the model as the same exchange, which is
+   * what lets the partner acknowledge the retry and then greet the new scene
+   * without an intermediate "hi, I'm back" that the learner did not write.
+   */
+  const targetSprint: Sprint | null = isSprintEnd
+    ? openNextSprint(sessionId, drillSprint.seq)
+    : drillSprint;
+  if (!targetSprint) {
+    // No next scene means the session is over. The drill response committed,
+    // and the learner has seen the drill prompt — nothing more to do here.
+    emit({
+      t: "done",
+      learnerTurn: written,
+      turn: lastPartnerOfSprint(drillSprint),
+      firstSentenceMs: Date.now() - started,
+      sprint: drillSprint,
+      debrief: null,
+      status: "ended",
+      fumbleDeckSize: fumbleDeck.length,
+      fumbleDeck,
+    });
+    void drilled;
+    return;
+  }
+
+  // Mid-conversation drills replay the active sprint's prior turns so the model
+  // sees the scene it is in. Sprint-end drills replay the closing sprint's turns
+  // (the partner was in character there) but ask for the next scene's opening.
+  const sprintTurns = isSprintEnd
+    ? getTurns(sessionId).filter((t) => t.sprintId === drillSprint.id)
+    : getTurns(sessionId).filter((t) => t.sprintId === drillSprint.id);
+
+  const ask = async (ctx: PromptContext, history: Turn[], learnerLine: string): Promise<ParsedReply | null> => {
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: buildSystemPrompt(ctx) },
+    ];
+    for (const turn of history) {
+      messages.push(
+        turn.role === "partner"
+          ? { role: "assistant", content: turn.text }
+          : { role: "user", content: turn.text },
+      );
+    }
+    messages.push({ role: "user", content: learnerLine });
+
+    let sentHere = 0;
+    const call = async (): Promise<ParsedReply> => {
+      const raw = await streamChat({
+        messages,
+        signal,
+        onDelta: (_chunk, accumulated) => {
+          const prose = visibleProse(accumulated);
+          if (prose.length > sentHere) {
+            emit({ t: "delta", v: prose.slice(sentHere) });
+            sentHere = prose.length;
+            sent = sentHere;
+          }
+          if (firstSentenceMs === null && firstSentenceEnd(prose) > 0) {
+            firstSentenceMs = Date.now() - started;
+            shownSentence = true;
+          }
+        },
+      });
+      return parseReply(raw, learnerText);
+    };
+
+    let parsed = await call();
+    if (clientSignal.aborted) return null;
+    if (!shownSentence && (!parsed.text || !looksJapanese(parsed.text))) {
+      sentHere = 0;
+      firstSentenceMs = null;
+      shownSentence = false;
+      emit({ t: "reset" });
+      parsed = await call();
+    }
+    if (!parsed.text || !looksJapanese(parsed.text)) {
+      throw new ModelError("The partner had nothing usable to say.");
+    }
+    return parsed;
+  };
+
+  try {
+    const earlier = earlierGoals(sprints, targetSprint.seq);
+    // Mid-conversation drills pass the drill response as the user message so
+    // the model knows what the learner just said; sprint-end drills pass the
+    // arrival placeholder because the response is the first utterance of the
+    // new scene rather than an answer to anything.
+    const learnerLine = isSprintEnd ? "（学習者が来た）" : learnerText;
+    const parsed = await ask(
+      {
+        brief: targetSprint.brief,
+        moment: isSprintEnd ? "opening" : "reply",
+        stance: "plain",
+        earlier,
+        deckWords: activeDeckWords(),
+        grammarPoint: getSession(sessionId)?.grammarPoint ?? null,
+      },
+      sprintTurns,
+      learnerLine,
+    );
+    if (parsed === null) return;
+
+    const { partnerTurn } = commitExchange(
+      sessionId,
+      null,
+      {
+        role: "partner",
+        text: parsed.text,
+        naturalPhrasing: null,
+        markers: parsed.markers,
+      },
+      targetSprint,
+    );
+
+    emit({
+      t: "done",
+      learnerTurn: written,
+      turn: partnerTurn,
+      firstSentenceMs: firstSentenceMs ?? Date.now() - started,
+      sprint: targetSprint,
+      debrief: null,
+      status: "active",
+      fumbleDeckSize: fumbleDeck.length,
+      fumbleDeck,
+    });
+    void drilled;
+  } catch (err) {
+    if (clientSignal.aborted) return;
+    if (sent > 0 && !shownSentence) emit({ t: "reset" });
+    const reason =
+      timeout.aborted && !clientSignal.aborted
+        ? `The partner took longer than ${Math.round(modelTimeoutMs() / 1000)}s to answer.`
+        : err instanceof ModelError
+          ? err.message
+          : err instanceof Error && err.name === "AbortError"
+            ? "The model call was cut short."
+            : "The model call failed.";
+    emit({ t: "error", message: reason, retryable: err instanceof ModelError ? err.retryable : true });
+  }
+}
+
+/**
+ * Open the next planned sprint in the session's plan, or null when the plan
+ * has run out.
+ *
+ * Lifted out so the drill response handler can pick the right continuation
+ * sprint without duplicating the open-or-return-null logic that the boundary
+ * already knows.
+ */
+function openNextSprint(sessionId: string, afterSeq: number): Sprint | null {
+  const sprints = getSprints(sessionId);
+  const next = nextSprint(sprints, afterSeq);
+  if (!next) return null;
+  // The plan row was written at session start; this is a regular `openSprint`
+  // under a fresh `active` status. The clock starts on the next model call.
+  return openPlannedSprint(sessionId, afterSeq + 1, next);
+}
+
+function lastPartnerOfSprint(sprint: Sprint): Turn {
+  return {
+    id: -1,
+    seq: -1,
+    role: "partner",
+    sprintId: sprint.id,
+    text: "",
+    naturalPhrasing: null,
+    markers: [],
+    kind: "normal",
+    drillNatural: null,
+    responseMs: null,
+    createdAt: Date.now(),
+  };
 }

@@ -24,7 +24,7 @@ const SAID: { role: "partner" | "learner"; text: string; naturalPhrasing: null; 
 
 async function ask(brief: typeof IZAKAYA_OPENING, moment: Moment, learner: string | null) {
   const stance: Stance = learner === null ? "plain" : readStance(SAID).stance;
-  const system = buildSystemPrompt({ brief, moment, stance, earlier: [] });
+  const system = buildSystemPrompt({ brief, moment, stance, earlier: [], deckWords: [], grammarPoint: null });
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: system },
   ];
