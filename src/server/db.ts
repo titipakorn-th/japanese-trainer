@@ -102,6 +102,7 @@ const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
   ["fumble", "drilled", "INTEGER NOT NULL DEFAULT 0"],
   ["fumble", "cleared_at", "INTEGER"],
   ["session", "furigana_on", "INTEGER NOT NULL DEFAULT 0"],
+  ["session", "grammar_point_slug", "TEXT"],
 ];
 
 /** Columns renamed in place, when the old name is present and the new one is not. */
