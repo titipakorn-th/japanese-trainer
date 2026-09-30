@@ -3,9 +3,11 @@ import { db } from "./db";
 import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
 import { buildDebrief } from "./debrief";
-import { getFumbleDeck, insertFumbles, type DetectedFumble } from "./fumbles";
+import { getFumbleDeck, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
+import { getGrammarPoint, pickGrammarPoint } from "./grammarPoints";
 import type {
   Debrief,
+  GrammarPoint,
   Marker,
   Scenario,
   Session,
@@ -38,6 +40,8 @@ interface SessionRow {
   scenario: string;
   status: string;
   ended_at: number | null;
+  furigana_on: number | null;
+  grammar_point_slug: string | null;
 }
 
 interface SprintRow {
@@ -61,6 +65,7 @@ interface TurnRow {
   text: string;
   natural: string | null;
   markers: string;
+  drill_natural: string | null;
   response_ms: number | null;
   created_at: number;
 }
@@ -72,7 +77,45 @@ function toSession(row: SessionRow): Session {
     endedAt: row.ended_at,
     scenario: getScenario(row.scenario) ?? DEFAULT_SCENARIO,
     status: row.status === "ended" ? "ended" : "active",
+    furiganaOn: row.furigana_on === 1,
+    grammarPoint: resolveGrammarPoint(row.grammar_point_slug),
   };
+}
+
+/**
+ * Look up the grammar point stored on a session, or null when the column is
+ * unset (a session recorded before the grammar-point slice existed) or the
+ * slug no longer exists in the catalog (a removed entry). Both cases are the
+ * same UI: the rail does not show a card, the prompt carries no instruction,
+ * and the session still runs.
+ */
+function resolveGrammarPoint(slug: string | null): GrammarPoint | null {
+  if (!slug) return null;
+  return getGrammarPoint(slug);
+}
+
+/**
+ * How often each grammar point has been used, across all sessions on this
+ * device.
+ *
+ * The picker uses this to rotate across points rather than handing the same
+ * one out twice in a row, so a learner who runs the izakaya family three
+ * times in a row meets all three izakaya-fitting patterns instead of the same
+ * one each time. Counts are read from the same session rows the rest of the
+ * app reads, so the rotation survives a reload.
+ */
+function grammarPointUsage(): Record<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT grammar_point_slug AS slug, COUNT(*) AS n
+         FROM session
+        WHERE grammar_point_slug IS NOT NULL
+        GROUP BY grammar_point_slug`,
+    )
+    .all() as { slug: string; n: number }[];
+  const out: Record<string, number> = {};
+  for (const row of rows) out[row.slug] = row.n;
+  return out;
 }
 
 function toSprint(row: SprintRow, family: Scenario): Sprint | null {
@@ -117,6 +160,10 @@ function toTurn(row: TurnRow): Turn {
     text: row.text,
     naturalPhrasing: row.natural,
     markers,
+    // `drill_natural` is set only on the partner turn that issued the drill —
+    // every other row is a normal turn.
+    kind: row.drill_natural ? "drill" : "normal",
+    drillNatural: row.drill_natural,
     responseMs: row.response_ms,
     createdAt: row.created_at,
   };
@@ -152,12 +199,18 @@ export function createSession(scenario: Scenario = DEFAULT_SCENARIO): Session {
   const now = Date.now();
   const plan = planSprints(scenario);
   const target = pacing().sprintTurns;
+  // The grammar point is picked outside the transaction so the picker can read
+  // past usage without taking a write lock. It writes to the row in the same
+  // transaction as the rest of the plan, so the slug and the plan commit
+  // together — a half-written session would be one without a grammar point.
+  const grammarPoint = pickGrammarPoint(scenario, grammarPointUsage());
 
   db.transaction(() => {
-    db.prepare("INSERT INTO session (id, created_at, scenario, status, ended_at) VALUES (?, ?, ?, 'active', NULL)").run(
+    db.prepare("INSERT INTO session (id, created_at, scenario, status, ended_at, furigana_on, grammar_point_slug) VALUES (?, ?, ?, 'active', NULL, 0, ?)").run(
       id,
       now,
       scenario.slug,
+      grammarPoint.slug,
     );
     const first = plan[0] ?? scenario.sprints[0];
     // The first scene is live, but it has not *started* — the record exists before
@@ -173,7 +226,15 @@ export function createSession(scenario: Scenario = DEFAULT_SCENARIO): Session {
     }
   })();
 
-  return { id, createdAt: now, endedAt: null, scenario, status: "active" };
+  return {
+    id,
+    createdAt: now,
+    endedAt: null,
+    scenario,
+    status: "active",
+    furiganaOn: false,
+    grammarPoint,
+  };
 }
 
 export function getSession(id: string): Session | null {
@@ -227,6 +288,7 @@ export function getSessionState(id: string): SessionState | null {
     pacing: pacing(),
     fumbleDeck,
     fumbleDeckSize: fumbleDeck.length,
+    furiganaOn: session.furiganaOn,
   };
 }
 
@@ -242,11 +304,18 @@ export interface NewTurn {
   text: string;
   naturalPhrasing: string | null;
   markers: Marker[];
+  /**
+   * Set on the partner turn that asks the learner to retry a phrase. Null for
+   * every other turn — the default is the right default for ninety-nine percent
+   * of the conversation, and the column is nullable so a row without a drill is
+   * literally the absence of one.
+   */
+  drillNatural?: string | null;
 }
 
 const insertTurn = db.prepare(
-  `INSERT INTO turn (session_id, seq, role, sprint_id, text, natural, markers, response_ms, created_at)
-   VALUES (@sessionId, @seq, @role, @sprintId, @text, @natural, @markers, @responseMs, @createdAt)`,
+  `INSERT INTO turn (session_id, seq, role, sprint_id, text, natural, markers, drill_natural, response_ms, created_at)
+   VALUES (@sessionId, @seq, @role, @sprintId, @text, @natural, @markers, @drillNatural, @responseMs, @createdAt)`,
 );
 
 function writeTurn(
@@ -257,6 +326,7 @@ function writeTurn(
   createdAt: number,
   responseMs: number | null = null,
 ): Turn {
+  const drillNatural = t.drillNatural ?? null;
   const info = insertTurn.run({
     sessionId,
     seq,
@@ -265,6 +335,7 @@ function writeTurn(
     text: t.text,
     natural: t.naturalPhrasing,
     markers: JSON.stringify(t.markers),
+    drillNatural,
     responseMs,
     createdAt,
   });
@@ -276,6 +347,8 @@ function writeTurn(
     text: t.text,
     naturalPhrasing: t.naturalPhrasing,
     markers: t.markers,
+    kind: drillNatural ? "drill" : "normal",
+    drillNatural,
     responseMs,
     createdAt,
   };
@@ -305,7 +378,7 @@ function insertSprint(
  * whose plan ran out gets a row inserted, and then only because there is
  * genuinely nothing to open.
  */
-function openSprint(sessionId: string, seq: number, brief: SprintBrief, startedAt: number): Sprint {
+export function openSprint(sessionId: string, seq: number, brief: SprintBrief, startedAt: number): Sprint {
   const family = getSession(sessionId)?.scenario ?? DEFAULT_SCENARIO;
   const planned = db
     .prepare(`SELECT * FROM sprint WHERE session_id = ? AND seq = ?`)
@@ -427,6 +500,13 @@ export interface Boundary {
   opening: NewTurn | null;
   /** Fumbles captured on the closing learner's turn, if there was one. */
   fumbles: FumbleCapture | null;
+  /**
+   * Optional drill partner turn to issue right after the closing line, on the
+   * worst fumble of the sprint. Belongs to the closing sprint so the deck and
+   * the debrief both see it as part of the scene it happened in. The drill
+   * response lands later, in a separate turn call.
+   */
+  drill: { text: string; natural: string } | null;
 }
 
 /**
@@ -435,10 +515,11 @@ export interface Boundary {
  * This is the riskiest write in the app: it moves the session from one scene to
  * another, and a half-applied boundary would leave the learner in a scene the
  * debrief had already closed, or in a new one that never opened. So the closing
- * exchange, the debrief, the sprint rows, the session's status, and the next
- * scene's opening line all commit together or none of them do — which means both
- * model calls are made before any of it is written, and a failure in either one
- * costs the learner nothing and leaves the conversation where it was.
+ * exchange, the debrief, the sprint rows, the session's status, the optional
+ * drill partner turn, and the next scene's opening line all commit together or
+ * none of them do — which means both model calls are made before any of it is
+ * written, and a failure in either one costs the learner nothing and leaves the
+ * conversation where it was.
  */
 export const commitBoundary = db.transaction(
   (
@@ -449,6 +530,7 @@ export const commitBoundary = db.transaction(
     debrief: Debrief;
     learnerTurn: Turn | null;
     closingTurn: Turn;
+    drillTurn: Turn | null;
     nextSprint: Sprint | null;
     openingTurn: Turn | null;
     status: SessionStatus;
@@ -467,6 +549,26 @@ export const commitBoundary = db.transaction(
       boundary.closing,
       now,
     );
+    // The drill partner turn, when present, lives between the closing line and
+    // the next scene. It belongs to the closing sprint because the fumble it
+    // retries is part of that scene; the drill response lands later, in a
+    // separate turn, and also gets attributed to the closing sprint so a
+    // re-render of the transcript stays consistent.
+    const drillTurn = boundary.drill
+      ? writeTurn(
+          sessionId,
+          seq + (learnerTurn ? 2 : 1),
+          sprint.id,
+          {
+            role: "partner",
+            text: boundary.drill.text,
+            naturalPhrasing: null,
+            markers: [],
+            drillNatural: boundary.drill.natural,
+          },
+          now,
+        )
+      : null;
     if (learnerTurn && boundary.fumbles && boundary.fumbles.detected.length > 0) {
       insertFumbles(
         sessionId,
@@ -490,9 +592,12 @@ export const commitBoundary = db.transaction(
     if (boundary.next && boundary.opening) {
       const nextSeqNumber = sprint.seq + 1;
       nextSprint = openSprint(sessionId, nextSeqNumber, boundary.next, now);
+      // A drill partner turn shifts the opening line's seq number forward by
+      // one. Without the +1 a drill would let two turns share a sequence
+      // number, which the (session_id, seq) unique constraint would reject.
       openingTurn = writeTurn(
         sessionId,
-        seq + (learnerTurn ? 2 : 1),
+        seq + (learnerTurn ? 2 : 1) + (drillTurn ? 1 : 0),
         nextSprint.id,
         boundary.opening,
         now,
@@ -502,9 +607,126 @@ export const commitBoundary = db.transaction(
       status = "ended";
     }
 
-    return { debrief, learnerTurn, closingTurn, nextSprint, openingTurn, status };
+    return { debrief, learnerTurn, closingTurn, drillTurn, nextSprint, openingTurn, status };
   },
 );
+
+/**
+ * The drill response — a learner turn that answers a drill partner turn.
+ *
+ * Returned separately from the rest of the turn machinery because a drill
+ * response is the one place the server writes a learner turn without a partner
+ * turn to follow it. The drill itself is in the closed sprint's transcript,
+ * and the next call from `runTurn` will produce the partner continuation or
+ * the next scene's opening.
+ *
+ * The success evaluation is a substring match on the normalised learner text:
+ * a Japanese phrase contains itself, and the match has to be lenient enough
+ * that punctuation and spaces do not turn a correct answer into a failure.
+ * The deck cares about the natural form, not its exact surface.
+ */
+export function isDrillSuccess(learnerText: string, drillNatural: string): boolean {
+  if (!drillNatural) return false;
+  const norm = (s: string): string => s.replace(/[\s。、！？!?「」『』,.。]/g, "").toLowerCase();
+  return norm(learnerText).includes(norm(drillNatural));
+}
+
+/**
+ * Find the closed sprint that has a pending drill partner turn awaiting a
+ * response.
+ *
+ * A pending drill is the most recent partner turn whose `kind` is `drill`. The
+ * sprint it belongs to is whatever sprint row holds that turn. Returns null
+ * when no pending drill exists, which is the common case and the only state
+ * `runTurn` cares about for normal exchanges.
+ */
+export function findPendingDrillSprint(sessionId: string): Sprint | null {
+  const row = db
+    .prepare(
+      `SELECT sprint_id FROM turn
+        WHERE session_id = ? AND role = 'partner' AND drill_natural IS NOT NULL
+        ORDER BY seq DESC, id DESC LIMIT 1`,
+    )
+    .get(sessionId) as { sprint_id: string | null } | undefined;
+  if (!row || !row.sprint_id) return null;
+  const sprint = db
+    .prepare(`SELECT * FROM sprint WHERE id = ?`)
+    .get(row.sprint_id) as SprintRow | undefined;
+  if (!sprint) return null;
+  const session = getSession(sessionId);
+  if (!session) return null;
+  return toSprint(sprint, session.scenario);
+}
+
+/**
+ * Commit a drill response learner turn and, on success, mark the matching
+ * fumble as drilled.
+ *
+ * The drill response belongs to the sprint that holds the drill partner turn
+ * (always a closed sprint). Marking the fumble is the entire point of the
+ * retry — a success is a row update, a failure is silence, and the difference
+ * shows up in the deck on the next reload.
+ *
+ * Returns the committed learner turn so the stream can emit a `done` frame
+ * for it. The partner continuation lives in the caller's hands: this function
+ * does not decide whether to keep the scene going or open the next one — the
+ * caller knows which sprint the drill partner turn belonged to.
+ */
+export const commitDrillResponse = db.transaction(
+  (
+    sessionId: string,
+    drillSprintId: string,
+    text: string,
+    responseMs: number | null,
+  ): { learnerTurn: Turn; drilled: boolean } => {
+    const now = Date.now();
+    const seq = nextSeq(sessionId);
+    const learnerTurn = writeTurn(
+      sessionId,
+      seq,
+      drillSprintId,
+      {
+        role: "learner",
+        text,
+        naturalPhrasing: null,
+        markers: [],
+      },
+      now,
+      responseMs,
+    );
+    const drillRow = db
+      .prepare(
+        `SELECT drill_natural FROM turn
+          WHERE session_id = ? AND role = 'partner' AND drill_natural IS NOT NULL
+            AND sprint_id = ?
+          ORDER BY seq DESC, id DESC LIMIT 1`,
+      )
+      .get(sessionId, drillSprintId) as { drill_natural: string } | undefined;
+    let drilled = false;
+    if (drillRow?.drill_natural && isDrillSuccess(text, drillRow.drill_natural)) {
+      const changes = markFumblesDrilledByNatural(drillRow.drill_natural, drillSprintId);
+      drilled = changes > 0;
+    }
+    return { learnerTurn, drilled };
+  },
+);
+
+/**
+ * Switch furigana on or off for one session.
+ *
+ * Furigana is a session-scoped display preference: the learner turns it on once
+ * and it stays on for the rest of the session, including across reloads. A
+ * session that has already ended cannot be flipped — the learner can no longer
+ * see its transcript, so changing the preference is meaningless. Returns the
+ * resulting flag, or null when the session does not exist or has ended.
+ */
+export function setSessionFurigana(sessionId: string, on: boolean): boolean | null {
+  const session = getSession(sessionId);
+  if (!session) return null;
+  if (session.status === "ended") return null;
+  db.prepare("UPDATE session SET furigana_on = ? WHERE id = ?").run(on ? 1 : 0, sessionId);
+  return on;
+}
 
 /**
  * End a session where it stands, keeping everything in it.
