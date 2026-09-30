@@ -108,6 +108,50 @@ export interface Scenario {
  */
 export type SprintEnding = "budget" | "sprint-clock" | "session-clock" | "abandoned" | "migrated";
 
+/**
+ * Why a particular moment counts as a fumble.
+ *
+ * The four cases mirror the spec: abandoned (no answer worth reading), compressed
+ * (a required phrase said too short), hedged (circled the word), or wrong-form
+ * (the form a native speaker would not use). The class is what the partner would
+ * have said in the debrief; the model picks it, and a wrong pick is silently
+ * preserved rather than re-classified, because re-classifying is a guess the
+ * transcript cannot back up.
+ */
+export type FumbleReason = "abandoned" | "compressed" | "hedged" | "wrong-form";
+
+/**
+ * One stored moment of failure.
+ *
+ * `surface` is the substring of the learner's text the marker anchors to. For an
+ * abandoned turn there is nothing to underline, so it is the empty string and no
+ * inline marker is rendered; the moment is still on the deck. `natural` is the form
+ * the learner was reaching for and is the deck key: the same `会計` covers a learner
+ * who said `billing`, `bill`, or `チェック`.
+ */
+export interface Fumble {
+  id: string;
+  surface: string;
+  natural: string;
+  learnerSaid: string;
+  situation: string;
+  reason: FumbleReason;
+  sessionId: string;
+  sprintId: string | null;
+  turnId: number | null;
+  createdAt: number;
+}
+
+/**
+ * One entry in the deck view: a natural form, how often it has been fumbled, and
+ * when last. Worst offenders first, so effort goes where the learner is weakest.
+ */
+export interface FumbleDeckEntry {
+  natural: string;
+  count: number;
+  lastSeenAt: number;
+}
+
 export interface Sprint {
   id: string;
   sessionId: string;
@@ -161,6 +205,8 @@ export interface Debrief {
   words: Pick<Marker, "surface" | "reading" | "meaning">[];
   /** Each quiet correction the partner gave, with what it replaced. */
   corrections: { said: string; natural: string }[];
+  /** Every fumble the model caught during this sprint, with the situation it happened in. */
+  fumbles: Fumble[];
   lines: DebriefLine[];
 }
 
@@ -172,6 +218,10 @@ export interface SessionState {
   activeSprint: Sprint | null;
   /** The walls the app is holding itself to, so the client can show them. */
   pacing: Pacing;
+  /** The deck as it stood when this snapshot was taken, worst offenders first. */
+  fumbleDeck: FumbleDeckEntry[];
+  /** Distinct natural forms the learner has fumbled so far. The "deck count". */
+  fumbleDeckSize: number;
 }
 
 /** The turn budgets and clocks a session runs on. See `pacing.ts`. */

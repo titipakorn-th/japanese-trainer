@@ -36,6 +36,20 @@ function sprintTable(name: string): string {
 
 const SPRINT_TABLE = sprintTable("IF NOT EXISTS sprint");
 
+const FUMBLE_TABLE = `
+CREATE TABLE IF NOT EXISTS fumble (
+  id            TEXT PRIMARY KEY,
+  surface       TEXT NOT NULL,
+  natural       TEXT NOT NULL,
+  learner_said  TEXT NOT NULL,
+  situation     TEXT NOT NULL,
+  reason        TEXT NOT NULL CHECK (reason IN ('abandoned', 'compressed', 'hedged', 'wrong-form')),
+  session_id    TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  sprint_id     TEXT REFERENCES sprint(id) ON DELETE SET NULL,
+  turn_id       INTEGER REFERENCES turn(id) ON DELETE SET NULL,
+  created_at    INTEGER NOT NULL
+);`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session (
   id         TEXT PRIMARY KEY,
@@ -61,6 +75,11 @@ CREATE TABLE IF NOT EXISTS turn (
 
 CREATE INDEX IF NOT EXISTS turn_session_seq ON turn (session_id, seq);
 CREATE INDEX IF NOT EXISTS sprint_session_seq ON sprint (session_id, seq);
+
+${FUMBLE_TABLE}
+CREATE INDEX IF NOT EXISTS fumble_natural ON fumble (natural);
+CREATE INDEX IF NOT EXISTS fumble_session ON fumble (session_id);
+CREATE INDEX IF NOT EXISTS fumble_sprint ON fumble (sprint_id);
 `;
 
 /**
