@@ -3,10 +3,12 @@
 Date: 2026-09-30
 Status: accepted
 
-Numbered 0009, not 0007. The partner-speech and first-sentence-budget ADRs were
-written and numbered first, in the same week, and 0007 and 0008 were already
-taken when this one was ready to land. The decision and its date are unchanged;
-only the slot in the sequence moved. See issue #15.
+Numbered 0009, not 0007. Three branches all claimed 0007 and two claimed 0008;
+0007 and 0008 went to the partner-speech and first-sentence-budget ADRs, and
+issue #11's took 0010 and 0011. This ADR carries the earliest date of the three,
+so it was not the oldest claim that gave way — it was the one already committed
+on a branch that had not landed, which is what made it the cheapest to move. The
+decision is unchanged. See issue #15.
 
 ## Context
 
