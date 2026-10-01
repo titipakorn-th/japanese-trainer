@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import Database, { SqliteError } from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -95,6 +95,12 @@ CREATE INDEX IF NOT EXISTS fumble_sprint ON fumble (sprint_id);
  * store created by an earlier build keeps its old shape unless the columns are
  * added here. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the column list is
  * read first — cheap, and only ever run at open.
+ *
+ * Reading first and then altering is a check-then-act, and on its own it is not
+ * safe: several build workers open the same fresh store at once, and every one
+ * of them can see the pre-migration shape. This is correct only because the
+ * caller holds an `IMMEDIATE` write lock across it — see `open`. See
+ * `docs/adr/0009-cold-start-migration.md`.
  */
 const ADDED_COLUMNS: [table: string, column: string, decl: string][] = [
   ["session", "ended_at", "INTEGER"],
@@ -196,6 +202,49 @@ function adoptPreSprintSessions(db: Database.Database): void {
   }
 }
 
+/**
+ * How long a worker waits for the write lock that guards a migration. Stated
+ * rather than inherited: waiting is half of what makes the migration safe, and
+ * better-sqlite3's 5000ms default happens to be right for it.
+ */
+const MIGRATION_LOCK_TIMEOUT_MS = 5000;
+
+/**
+ * Re-reads allowed while putting a *contended* store into WAL. The loop only
+ * ever spins for the length of another worker's migration — milliseconds — so
+ * this is a bound on a race, not a timeout; a value this large would be hiding
+ * a hang.
+ */
+const WAL_ATTEMPTS = 200;
+
+/** Journal mode is recorded in the file header, so a read reports what it is now. */
+const isWal = (db: Database.Database): boolean => db.pragma("journal_mode", { simple: true }) === "wal";
+
+/**
+ * Put the store in WAL, and survive the build workers that are not first.
+ *
+ * This is the one statement in the file that a busy timeout cannot rescue:
+ * changing journal mode needs an exclusive lock, and SQLite returns `SQLITE_BUSY`
+ * for it without consulting the busy handler — measured at 0ms against a held
+ * write lock, and succeeding 1ms after that lock was released. A worker that
+ * reaches it while a sibling is migrating dies before `migrate` is ever called.
+ *
+ * What does work is re-reading. WAL is set *before* the write lock is taken, so
+ * a worker that trips over `SQLITE_BUSY` here is almost always looking at a
+ * store another worker already put into WAL. That reasoning depends on the
+ * ordering in `open`, and stops holding if the two are swapped.
+ */
+function enableWal(db: Database.Database): void {
+  for (let attempt = 1; !isWal(db); attempt++) {
+    try {
+      db.pragma("journal_mode = WAL");
+    } catch (error) {
+      // Contention is worth another look; permissions or corruption is not.
+      if (!(error instanceof SqliteError) || error.code !== "SQLITE_BUSY" || attempt >= WAL_ATTEMPTS) throw error;
+    }
+  }
+}
+
 /** The store always lives under ./data, whatever the file is called. */
 const DATA_DIR = path.join(process.cwd(), "data");
 
@@ -206,10 +255,26 @@ function open(): Database.Database {
   mkdirSync(DATA_DIR, { recursive: true });
 
   const db = new Database(resolved);
-  db.pragma("journal_mode = WAL");
+  // Before anything that can contend, and explicit rather than inherited.
+  db.pragma(`busy_timeout = ${MIGRATION_LOCK_TIMEOUT_MS}`);
+  enableWal(db);
   db.pragma("foreign_keys = ON");
-  db.exec(SCHEMA);
-  migrate(db);
+
+  /**
+   * The schema and the migration are one transaction, taken as a write lock up
+   * front — `next build` collects page data with a pool of workers and every one
+   * of them imports this module, so a first build in a fresh clone is a dozen
+   * processes migrating one new file at once.
+   *
+   * `immediate` locks at `BEGIN`, before the first `PRAGMA`, so the column
+   * re-reads see the winner's committed state. A deferred transaction would not
+   * lock until its first write, which is the check-then-act this removes.
+   */
+  db.transaction(() => {
+    db.exec(SCHEMA);
+    migrate(db);
+  }).immediate();
+
   return db;
 }
 

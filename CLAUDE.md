@@ -12,13 +12,15 @@ npm install
 npm run dev                  # http://localhost:3000
 ```
 
-Other scripts: `npm run typecheck`, `npm run build`, `npm start`, and
+Other scripts: `npm run typecheck`, `npm run build`, `npm start`,
 `npm run probe:model` — which streams real replies through the production prompt
 and prints first-sentence timings, so the latency budget can be re-checked against
 whatever models are available (see `docs/adr/0001-conversation-partner-model.md`) —
 `npm run probe:tts` — which speaks every scenario line through the real voice
 service and prints cold/warm timings, the MP3 header, the timed-word count and the
-billable characters. See `docs/adr/0007-partner-speech.md`.
+billable characters. See `docs/adr/0007-partner-speech.md` — and
+`npm run probe:migrate` — which races a dozen cold starts against one fresh store and
+checks the schema they leave. See `docs/adr/0009-cold-start-migration.md`.
 
 Point `MOCK_MODEL_URL` at a local endpoint to exercise the model failure and
 timeout paths without spending a model call. `MOCK_TTS_URL` does the same for the
@@ -62,6 +64,37 @@ Confirm in the browser too: a partner turn shows a quiet `▶` beside its
 PARTNER label, tapping it plays, tapping a second line stops the first, and
 killing `MOCK_TTS_URL`'s target shows "No audio" briefly and leaves the
 conversation intact.
+## A cold build migrates the store from every worker at once
+`next build` collects page data with a pool of workers, and each one imports
+`src/server/db.ts`, which opens the store and migrates it at module scope. So the
+first build in a fresh clone — the first thing a new contributor ever runs — is a
+dozen processes creating and migrating the same file at the same instant.
+Everything in `open()` therefore runs under contention, and two of the statements
+there fail *differently and for unrelated reasons*, which is what makes this
+worth knowing about:
+- `migrate()` read the column list and then `ALTER`ed it, outside any lock. Two
+  workers could both decide `turn.sprint_id` was missing; the loser died with
+  `duplicate column name: sprint_id`. It is now one `IMMEDIATE` transaction, so
+  the re-read happens under the write lock that guards the `ALTER`. Keep it that
+  way: any new migration is still a check-then-act, and a deferred transaction
+  would reintroduce this exactly.
+- `PRAGMA journal_mode = WAL` **cannot** be fixed with a busy timeout. Changing
+  journal mode needs an exclusive lock, and SQLite returns `SQLITE_BUSY` for it
+  without consulting the busy handler — measured at 0ms against a held write
+  lock. `enableWal` resolves it by re-reading instead, which works only because
+  WAL is set *before* the write lock is taken, so a blocked worker finds the store
+  already in WAL. Reorder those two steps and the re-read stops being sound.
+Both surface as a build that fails during page-data collection, on the first build
+in a fresh clone, and with an error that reads as a schema bug rather than a race
+— so the cause is easy to misattribute to the schema. The window is narrow: a
+handful of failures in a hundred cold starts, and it does not reproduce at all
+once the file exists.
+After touching `src/server/db.ts`, run `npm run probe:migrate`. It releases N
+processes against one fresh store on a shared clock and reports each death, split
+into `duplicate column` (the check-then-act is not atomic) and `lock` (the write
+lock is not being waited on) because the two need opposite fixes. It also reads
+the store back and fails on a missing column, which catches a migration that
+opens without migrating. It costs nothing and touches only scratch files.
 
 ## Agent skills
 
