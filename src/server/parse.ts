@@ -32,9 +32,30 @@ import type { FumbleReason, Marker, MarkerKind } from "@/lib/types";
 const FENCE = "```";
 /** The line the partner writes the quiet correction on, if there is one. */
 const CORRECTION = /^修正[:：][ \t]*/;
+/**
+ * The same marker, not yet complete: a line holding nothing but the start of it.
+ *
+ * Held back rather than shown, because the streaming caller only ever moves
+ * forward — it emits `prose.slice(sent)` and never retracts. A bare `修` read as
+ * prose is a character on the learner's screen that the next chunk cannot take
+ * back, so a half-written marker is withheld until it is known to be one. The
+ * held-back set is every prefix of the marker down to a single character, since
+ * a model streams the word in whatever pieces it likes and a one-character
+ * prefix is the one that arrives.
+ *
+ * A line that merely *starts* with `修` is not held back: it is released whole as
+ * soon as it grows past the marker, so `修理の件ですが` is prose and always was.
+ */
+const PARTIAL_CORRECTION = /^修[正]?[:：]?[ \t]*$/;
 
 export interface ParsedReply {
-  /** The partner's line, with the correction line and metadata block removed. */
+  /**
+   * The partner's line, with the metadata block removed.
+   *
+   * The quiet correction is off this string too, unless it was the only thing
+   * the model wrote — then it *is* the partner's line, and it is not repeated as
+   * `naturalPhrasing`. See `splitReply`.
+   */
   text: string;
   naturalPhrasing: string | null;
   markers: Marker[];
@@ -127,6 +148,12 @@ function str(v: unknown): string {
  * partner's line never contains either. Trimming is left to the caller, because
  * the streaming caller needs an untrimmed prefix it can measure against how much
  * it has already sent.
+ *
+ * What comes back is one of three shapes. The designed one is a partner line
+ * with the quiet correction after it, and the correction comes back separately
+ * to be hung on the learner's turn. A reply with no correction line is the
+ * common case. The third is a reply that is nothing but a correction, where the
+ * correction *is* the line — see below.
  */
 export function splitReply(raw: string): {
   prose: string;
@@ -134,25 +161,123 @@ export function splitReply(raw: string): {
   metadata: string | null;
 } {
   const fence = raw.indexOf(FENCE);
-  const head = fence < 0 ? raw : raw.slice(0, fence);
+  /**
+   * The visible head, with the two things a stream can end on mid-shape held
+   * back, because the streaming caller cannot un-send what it has shown.
+   *
+   * A fence still opening — one or two backticks so far — is not prose. Three is
+   * a fence, and `indexOf` has already found it. The cost is a partner line that
+   * genuinely ends in one or two backticks losing them, which the prompt's
+   * "Japanese only, no markup" rules make not a thing that happens, against every
+   * turn otherwise opening with a flash of backticks. And a trailing newline is
+   * not prose either: it is the model saying a new line is starting, and that line
+   * may yet turn out to be a correction marker, which would withdraw the newline
+   * and leave the last real character of the line unsent. Internal newlines are
+   * left alone; only the ones with nothing after them are dropped.
+   */
+  const head = (fence < 0 ? raw.replace(/`{1,2}$/, "") : raw.slice(0, fence)).replace(/\n+$/, "");
   const metadata = fence < 0 ? null : raw.slice(fence + FENCE.length);
 
-  let correction: string | null = null;
-  let prose = head;
-
   const lines = head.split("\n");
+
+  // The line the marker is on, and what is left of it once the marker is off.
+  // `rest` is null both for a marker that is still being typed and for one with
+  // nothing after it: neither is a correction, and in both cases the marker line
+  // is dropped from the prose.
+  let cut = lines.length;
+  let rest: string | null = null;
+
   for (let i = 0; i < lines.length; i++) {
-    const match = CORRECTION.exec(lines[i] ?? "");
-    if (!match) continue;
-    // Only the rest of that line. Taking the lines after it too would swallow
-    // prose written on a later line into the correction, which is exactly the
-    // wrong-correction case the guard downstream exists to catch.
-    correction = (lines[i] ?? "").slice(match[0].length).trim() || null;
-    prose = lines.slice(0, i).join("\n");
-    break;
+    const line = lines[i] ?? "";
+    const match = CORRECTION.exec(line);
+    if (match) {
+      cut = i;
+      rest = line.slice(match[0].length).trim() || null;
+      break;
+    }
+    // Only the last line can still be growing, so only the last line can be a
+    // half-written marker. A newline through the line means the model has moved
+    // on, and whatever it wrote there is prose.
+    if (i === lines.length - 1 && PARTIAL_CORRECTION.test(line)) {
+      cut = i;
+      break;
+    }
   }
 
-  return { prose, correction, metadata };
+  const before = lines.slice(0, cut).join("\n");
+
+  if (rest === null) {
+    // Nothing to hand back as a correction, so what came before is the prose.
+    // With nothing cut this is the head unchanged.
+    return { prose: showable(before), correction: null, metadata };
+  }
+
+  if (before.trim() !== "") {
+    // The designed shape: a partner line, then the quiet correction under it.
+    // Only the rest of that line. Taking the lines under it too would swallow
+    // prose written on a later line into the correction, which is exactly the
+    // wrong-correction case the guard downstream exists to catch.
+    return { prose: showable(before), correction: rest, metadata };
+  }
+
+  /**
+   * A reply that is nothing but a correction. The prompt asks for the partner's
+   * line first and the correction after it, and says so in three places, so this
+   * is a model that answered in the wrong order. It is not an error: what it
+   * wrote is a Japanese sentence in the persona's voice, which is the whole
+   * content of a turn, and the correction is asked for as a sentence usable
+   * as-is. Treating it as an empty reply threw away an exchange the partner did
+   * have and showed the learner an error for a turn where something was said, so
+   * the correction becomes the line instead.
+   *
+   * It is deliberately not also returned as `correction`. The learner is reading
+   * it as the partner's line, and the same sentence rendered a second time as
+   * the natural phrasing of the same turn is the duplication that follows — the
+   * one thing a correction cannot be is a line the learner has already read.
+   *
+   * This amends ADR 0002, which recorded the partner's line and the correction
+   * as always separate. See the consequences added there.
+   */
+  const after = unmasked(lines.slice(cut + 1));
+  return { prose: showable(after ? `${rest}\n${after}` : rest), correction: null, metadata };
+}
+
+/**
+ * The lines under the marker, with any further marker taken off them.
+ *
+ * The model was asked for one correction line and has written two. The first has
+ * become the partner's line, and the second is still an annotation — a raw `修正:`
+ * is the one string ADR 0002 guarantees never reaches the learner, and it must not
+ * reach them through the back door of a turn that was already rescued. Its
+ * sentence is kept, because it is Japanese the learner can act on and this turn is
+ * already committed to keeping what the model wrote; only the marker goes.
+ */
+function unmasked(lines: string[]): string {
+  const kept = lines.map((line) => {
+    const match = CORRECTION.exec(line);
+    return match ? line.slice(match[0].length).trim() : line;
+  });
+  // The last line is still growing, so a bare `修` there has not decided whether
+  // it is prose or the start of another marker. Withhold it rather than show a
+  // prefix that completing it would take back.
+  if (PARTIAL_CORRECTION.test(lines[lines.length - 1] ?? "")) kept.pop();
+  return kept.filter((line) => line !== "").join("\n");
+}
+
+/**
+ * Prose the client can be sent without owing the learner a retraction.
+ *
+ * Whitespace at the end is never content, and it is the one part of the stream
+ * that is not yet decided: a trailing blank line can be the line *before* a
+ * correction, and a correction arriving after it re-decides what the prose is.
+ * Sent as-is, the blank has already gone to the client by the time the correction
+ * lands, the correction then shortens the prose, and the stream is left holding a
+ * marker and a newline that the committed turn no longer contains. Ending the
+ * prose on its last real character keeps every delta appendable — the model can
+ * keep writing, but it can never take back.
+ */
+function showable(prose: string): string {
+  return prose.replace(/\s+$/, "");
 }
 
 /**

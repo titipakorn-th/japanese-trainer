@@ -2,6 +2,7 @@
 
 Date: 2026-09-29
 Status: accepted
+Amended: 2026-10-01, for issue #13 — see "A reply that is only a correction" under Consequences.
 
 ## Context
 
@@ -20,8 +21,9 @@ the line.
 
 The reply is a partner's line, optionally a `修正:` correction line, then one fenced JSON block
 of markers. The server streams only the prose and withholds everything from the correction line
-and the fence onward. The client renders the prose as it arrives, and when the turn commits it
-re-renders the same text with the markers applied.
+and the fence onward — except when the correction line is all there is, which makes it the prose
+itself. The client renders the prose as it arrives, and when the turn commits it re-renders the
+same text with the markers applied.
 
 Two things make this work:
 
@@ -53,6 +55,26 @@ reliable.
 - A reply that is empty, or is not Japanese, is retried once and then surfaced as an error. The
   client is sent a `reset` frame first so a half-drawn first attempt is not left on screen
   beside the retry.
+- **A reply that is only a correction is the partner's line.** The prompt already forbids this
+  shape — it asks for the line first, says the correction is not the reply, and says not to go on
+  to output 2 without a Japanese reply — so this is a model that ignored its instructions, not one
+  that was asked for the wrong thing. Nothing in the prompt needed changing; the parser had to
+  stop treating a disobedient reply as an absent one. It is not an error: what the model wrote is
+  a Japanese sentence in the persona's voice, which is the whole content of a turn, and the
+  correction is asked for as a sentence usable as-is. Treating it as an empty reply threw away an
+  exchange the partner did have and showed the learner an error for a turn where something was
+  said. So the correction becomes the line, and it is deliberately **not** also returned as the
+  quiet correction — the learner is already reading it, and the same sentence twice in one turn is
+  the duplication that follows. This is the one case where the prose and the correction are the
+  same text. A second `修正:` line in the same reply is stripped of its marker and kept as prose:
+  the marker itself is still the one string that never reaches the learner.
+- **The visible prose only ever grows.** Deltas are sent as `prose.slice(sent)` and never
+  retracted, so anything the client has been sent has to stay true. A half-written `修正:`
+  marker, a fence still opening, and a trailing blank line are all withheld or trimmed rather
+  than shown, because each can still resolve into something that re-decides where the prose
+  ends. A blank line before a correction is the case that needs it: shown as prose, it is
+  already on screen when the correction arrives and redefines the text, and the next delta
+  slices into the middle of a word.
 
 ## Rejected
 
