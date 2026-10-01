@@ -42,6 +42,17 @@ Use these terms exactly. They are the load-bearing concepts of the product.
 - **Consolidation day** — a session that stopped injecting New Words because
   the conversation showed strain and spent the remainder on the Fumble Deck.
   Reported honestly, not as a wasted session.
+- **Voice** — how the partner sounds. Chosen per session, not per Turn, and
+  applied to every partner line including Drills. It is not the Partner's
+  persona: a Persona decides what they say, the Voice decides how it is heard.
+- **Speech** — a partner line rendered as audio on the learner's request. A
+  pure function of the line's text and the Voice, which is why it can never
+  affect a Turn: it has no session and no history.
+- **Timed word** — one word of speech with the millisecond range it occupies in
+  the audio. What Karaoke highlighting is built from.
+- **Karaoke highlighting** — highlighting each Timed word as it is spoken, so a
+  learner can see the word they failed to catch. Specified and deliberately not
+  built yet; the Timed words are stored for every line ever spoken.
 
 ## Relationships
 
@@ -53,6 +64,9 @@ Use these terms exactly. They are the load-bearing concepts of the product.
 - A **Fumble** adds a word to the **Fumble Deck**.
 - The **Fumble Deck** constrains which words future **Sessions** must require.
 - A **Session** targets ~10 **New Words** and exactly one **Grammar Point**.
+- A **Session** has one **Voice**; a **Turn** can be heard as **Speech**.
+- **Speech** for a **Turn** carries **Timed words**, which Karaoke highlighting
+  would render. Nothing renders them yet.
 
 ## Non-goals
 

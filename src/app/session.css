@@ -244,6 +244,67 @@
   padding: 0 4px;
 }
 
+/* The label and the play button share a row so the button reads as belonging to
+   the line it speaks rather than floating between two turns. */
+.who-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 20px;
+}
+
+/*
+ * The play button is the whole of the audio affordance, and it is quiet on
+ * purpose: a learner reads a conversation far more often than they replay it,
+ * so the control is the size of a word and never competes with the Japanese.
+ * Partner-coloured, because it only ever appears on a partner turn.
+ */
+.speak {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font: 400 11px/1 var(--ui);
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.speak:hover:not(:disabled) {
+  color: #9ec1ff;
+  background: rgba(158, 193, 255, 0.09);
+}
+
+.speak:focus-visible {
+  outline: 2px solid #9ec1ff;
+  outline-offset: 1px;
+}
+
+.speak:disabled {
+  cursor: default;
+}
+
+/* Talking and waiting are distinguishable without colour, by glyph and weight. */
+.speak[data-phase="playing"] {
+  color: #9ec1ff;
+  font-size: 9px;
+}
+
+.speak[data-phase="loading"] {
+  color: var(--ink-faint);
+}
+
+.speak[data-phase="silent"] {
+  color: var(--fumble);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speak {
+    transition: none;
+  }
+}
+
 .turn.partner .who {
   color: #9ec1ff;
 }

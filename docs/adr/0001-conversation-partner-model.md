@@ -1,7 +1,8 @@
 # 1. The conversation partner's model
 
 Date: 2026-09-29
-Status: accepted
+Status: accepted — the 700–900ms budget below is superseded by ADR 0008; the
+model choice is not.
 
 ## Context
 
