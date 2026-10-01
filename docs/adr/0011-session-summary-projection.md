@@ -1,14 +1,15 @@
-# 10. The session summary is a projection, not a second read
+# 11. The session summary is a projection, not a second read
 
 Date: 2026-10-01
 Status: accepted
 
-Numbered 0010, not 0007. Three branches all claimed 0007 and two claimed 0008;
-0007 and 0008 went to the partner-speech and first-sentence-budget ADRs, and
-#7's new-words ADR took 0009. This ADR is the oldest of the three by nothing —
-they were all written the same week — so the slots went to whichever branch was
-cheapest to move, and this one was two files. The decision and its date are
-unchanged. See issue #15.
+Numbered 0011, not 0007. Numbers are grouped by the worktree that produces the
+ADRs, in the order those worktrees land. The partner-speech, first-sentence-
+budget and cold-start-migration ADRs are all one branch and hold 0007 through
+0009; issue #7's new-words ADR took 0010; this pair follows at 0011 and 0012.
+What forced the grouping is that no merge had happened yet, so five branches
+were each numbering themselves from 0007 while `main` still held nothing past
+0006. See issue #15.
 
 ## Context
 

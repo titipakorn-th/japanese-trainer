@@ -46,7 +46,7 @@ Anything the learner reads *about* a session is a projection of committed state
 rather than a second read. The end-of-session summary is a pure function in
 `src/lib/summary.ts` over the turns, sprints and fumbles the client already has,
 so a live session ending and a reload of a finished one produce the same account
-by the same code — see `docs/adr/0010-session-summary-projection.md`. If you find
+by the same code — see `docs/adr/0011-session-summary-projection.md`. If you find
 yourself wanting a `/summary` endpoint, that is the decision being re-litigated.
 
 ## Never cache a conversation
@@ -56,7 +56,7 @@ build output and nothing else: `/api/*` and `/session/*` are live server state
 and are never served from a cache, and navigations are network-first with an
 offline notice as the only fallback. A cached transcript is a screenshot of a
 conversation rather than the conversation, and the learner cannot tell the
-difference. See `docs/adr/0011-pwa-installability.md`.
+difference. See `docs/adr/0012-pwa-installability.md`.
 
 ## Measured numbers are claims with expiry
 

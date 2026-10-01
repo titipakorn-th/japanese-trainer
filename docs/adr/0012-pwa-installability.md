@@ -1,11 +1,11 @@
-# 11. The service worker caches nothing about the conversation
+# 12. The service worker caches nothing about the conversation
 
 Date: 2026-10-01
 Status: accepted
 
-Numbered 0011, not 0008, for the reason given at the top of ADR 0010: 0007 and
-0008 were claimed by three branches at once and the sequence was made
-contiguous. See issue #15.
+Numbered 0012, not 0008, for the reason given at the top of ADR 0011: 0007 and
+0008 were claimed by five branches at once and the sequence is now grouped by
+the worktree that produces each ADR. See issue #15.
 
 ## Context
 
@@ -18,7 +18,7 @@ with a fetch handler and a precache — that is what a browser looks for before 
 offers "Add to Home Screen". But this app's entire value rests on the server
 owning the session: a learner's turn and the partner's reply commit in one
 transaction (ADR 0003), a reload resumes from the database, and the end-of-session
-summary is a projection of what is actually on disk (ADR 0010). Every one of
+summary is a projection of what is actually on disk (ADR 0011). Every one of
 those is a promise that what the browser shows is what the server holds.
 
 A service worker is the one component in the stack that can quietly break that
