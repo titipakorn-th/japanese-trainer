@@ -15,7 +15,7 @@
  * server is gone. It precaches the shell so the app opens from a home screen
  * without a white flash, and it answers an unreachable server with a page that
  * says so, rather than the browser's own error or a stale transcript. See
- * `docs/adr/0008-pwa-installability.md`.
+ * `docs/adr/0011-pwa-installability.md`.
  *
  * Registered only in production. In development the build output is not
  * content-hashed, so a cached chunk is a stale chunk and every edit becomes a

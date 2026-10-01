@@ -1,7 +1,14 @@
-# 7. The session summary is a projection, not a second read
+# 10. The session summary is a projection, not a second read
 
 Date: 2026-10-01
 Status: accepted
+
+Numbered 0010, not 0007. Three branches all claimed 0007 and two claimed 0008;
+0007 and 0008 went to the partner-speech and first-sentence-budget ADRs, and
+#7's new-words ADR took 0009. This ADR is the oldest of the three by nothing —
+they were all written the same week — so the slots went to whichever branch was
+cheapest to move, and this one was two files. The decision and its date are
+unchanged. See issue #15.
 
 ## Context
 
