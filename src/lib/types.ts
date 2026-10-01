@@ -16,7 +16,7 @@
  * that makes a word *trained* rather than *read* — a word met once and never again
  * is a fact, and the app cannot tell the difference between a fact and a skill
  * unless the second meeting is recorded as its own event. See
- * `docs/adr/0007-new-words.md`.
+ * `docs/adr/0009-new-words.md`.
  *
  * `deck` is separate from both: a deck word is one the learner fumbled in an
  * earlier session, so the word is not new to them even though the scene treats

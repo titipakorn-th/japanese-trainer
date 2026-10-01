@@ -1,7 +1,12 @@
-# 7. A session has a word budget, and a word met once is not yet trained
+# 9. A session has a word budget, and a word met once is not yet trained
 
 Date: 2026-09-30
 Status: accepted
+
+Numbered 0009, not 0007. The partner-speech and first-sentence-budget ADRs were
+written and numbered first, in the same week, and 0007 and 0008 were already
+taken when this one was ready to land. The decision and its date are unchanged;
+only the slot in the sequence moved. See issue #15.
 
 ## Context
 
