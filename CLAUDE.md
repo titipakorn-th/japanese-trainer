@@ -35,6 +35,19 @@ Point `MOCK_MODEL_URL` at a local endpoint to exercise the model failure and
 timeout paths without spending a model call. `MOCK_TTS_URL` does the same for the
 voice service, without spending characters.
 
+## Do not rebuild under a running server
+
+`next start` serves whatever build is in `.next` when it boots, and `next build`
+replaces that directory. Chunk names are content-hashed, so most of them are
+identical across two builds and the swap stays invisible — until a chunk that only
+existed in the old build is requested, returns 500, and hydration never runs.
+
+The page still looks fine, because the server-rendered HTML is already in place.
+Every button is simply dead: no composer, no toggle, no tap target, no error
+anywhere in the UI. The only evidence is one 500 in the console, and it reads like
+a missing asset rather than a build lifecycle mistake — which is how a working
+toggle got mistaken for a broken one here. Stop the server, build, then start it.
+
 ## Architecture
 
 The server owns a session. The client renders a projection of it and is never the
