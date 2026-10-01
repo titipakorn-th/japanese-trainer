@@ -1,14 +1,14 @@
-# 9. A session has a word budget, and a word met once is not yet trained
+# 10. A session has a word budget, and a word met once is not yet trained
 
 Date: 2026-09-30
 Status: accepted
 
-Numbered 0009, not 0007. Three branches all claimed 0007 and two claimed 0008;
-0007 and 0008 went to the partner-speech and first-sentence-budget ADRs, and
-issue #11's took 0010 and 0011. This ADR carries the earliest date of the three,
-so it was not the oldest claim that gave way — it was the one already committed
-on a branch that had not landed, which is what made it the cheapest to move. The
-decision is unchanged. See issue #15.
+Numbered 0010, not 0007. Numbers are grouped by the worktree that produces the
+ADRs, in the order those worktrees land. The partner-speech, first-sentence-
+budget and cold-start-migration ADRs are all one branch and hold 0007 through
+0009; issue #11's pair follows at 0011 and 0012. What forced the grouping is
+that no merge had happened yet, so five branches were each numbering themselves
+from 0007 while `main` still held nothing past 0006. See issue #15.
 
 ## Context
 
