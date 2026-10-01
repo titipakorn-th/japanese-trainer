@@ -33,7 +33,7 @@ Use these terms exactly. They are the load-bearing concepts of the product.
   session, met inside a sentence the learner can already mostly follow. A New Word
   is a fact until the partner needs it again later in the session in a different
   sentence; that second meeting is what turns it into something the learner can
-  produce. See `docs/adr/0009-new-words.md`.
+  produce. See `docs/adr/0010-new-words.md`.
 - **Grammar Point** — the one grammar pattern taught per session, chosen to
   make the learner's sentences shorter. Used several times in the sprint so it
   lands as a pattern, not a memorised phrase.
