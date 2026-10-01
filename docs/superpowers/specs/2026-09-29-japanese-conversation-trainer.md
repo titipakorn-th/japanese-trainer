@@ -122,7 +122,7 @@ Each session also weaves in a target of 10 new words and one grammar point, chos
 
 - **MiniMax `M2-her`** as the conversation partner, over the OpenAI-compatible chat completions endpoint. It is documented as built for role-playing and multi-turn dialogue, which is exactly this use case, and it keeps the whole stack on one provider and one key.
 - One model call per turn does three jobs at once: produce the partner's next line, detect what the learner fumbled, and report any fumbles that should be drilled immediately. Splitting these into separate calls would double latency and cost for no benefit.
-- The reply is **streamed** and **sentence-split as it arrives**, so the first sentence is rendered as soon as it is complete rather than waiting for the whole reply. Conversation tolerates roughly 500ms before it feels broken; this is the single most important latency decision in the design.
+- The reply is **streamed** and **sentence-split as it arrives**, so the first sentence is rendered as soon as it is complete rather than waiting for the whole reply. Streaming is what makes a ~1.5s first sentence tolerable at all: without it the learner waits for the whole reply, not just its first sentence. The 500ms figure this design originally assumed is not reachable with any model on the current account and is withdrawn as a target.
 - The system prompt is assembled per turn from the sprint brief, the learner's level, the words already met this session, the Fumble Deck targets, the session's grammar point, and the corrections policy. It is a substantial, carefully-structured prompt and is treated as a first-class artifact, not an afterthought.
 
 ### Session structure
@@ -173,7 +173,7 @@ Four colours carry meaning consistently across the whole interface and are defin
 
 ### Latency
 
-- Budget: first sentence of the partner's reply visible within ~700–900ms of submitting a turn.
+- Budget: first sentence of the partner's reply on screen within ~1.5s of submitting a turn, timed in the browser from submit to the first sentence being complete to read. This is what the partner model actually does (1.3–1.8s in the app); the original 700–900ms figure described `M2-her`, which does not exist on this account, and no model available here reaches it. See `docs/adr/0008-first-sentence-budget.md`.
 - Achieved by streaming the model reply, sentence-splitting on the client, and rendering the first sentence as soon as it terminates.
 - The learner's own thinking time is *not* latency to optimise — it is the point of the exercise.
 

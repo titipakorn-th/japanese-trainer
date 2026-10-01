@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "probe:model": "tsx scripts/probe-model.ts"
+    "probe:model": "tsx scripts/probe-model.ts",
+    "probe:tts": "tsx scripts/probe-tts.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

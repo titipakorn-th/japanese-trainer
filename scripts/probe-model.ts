@@ -4,8 +4,8 @@ import { splitReply, visibleProse } from "@/server/parse";
 import { readStance, type Stance } from "@/server/stance";
 import { IZAKAYA, TRAIN } from "@/server/scenarios";
 import { firstSentenceEnd } from "@/lib/sentences";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { FIRST_SENTENCE_BUDGET_MS } from "@/lib/measure";
+import { loadSettings } from "./settings";
 import { performance } from "node:perf_hooks";
 
 /**
@@ -17,43 +17,6 @@ import { performance } from "node:perf_hooks";
  * catalog changes. Sprints made the prompt longer, and prefill is paid on every
  * turn, so the first sentence is the thing to watch.
  */
-
-/**
- * Fill in the settings this script needs from `.env.local`, and say so when the
- * environment disagrees with the file.
- *
- * Neither tsx nor Next overrides a variable that is already in the environment,
- * so a shell that happens to export `MINIMAX_API_KEY` — an agent runtime, a CI
- * image, a habit — silently wins over the file the repo documents. The result is
- * a 401 that looks like a stale key and is not. Filling only what is missing, and
- * warning about the conflict, keeps the script from quietly probing the wrong
- * thing while still letting a deliberate override work.
- */
-function loadSettings() {
-  const file = path.join(process.cwd(), ".env.local");
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    console.log(`no .env.local — using whatever is in the environment`);
-    return;
-  }
-
-  for (const line of text.split("\n")) {
-    const match = /^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
-    if (!match) continue;
-    const key = match[1]!;
-    const value = (match[2] ?? "").replace(/^["']|["']$/g, "");
-    const existing = process.env[key];
-    if (existing === undefined) process.env[key] = value;
-    else if (existing !== value) {
-      console.log(
-        `warning: ${key} is set in the environment and differs from .env.local — using the ` +
-          `environment's. Unset it to probe with the file's value.`,
-      );
-    }
-  }
-}
 
 loadSettings();
 
@@ -171,5 +134,5 @@ console.log(
 );
 console.log(
   `first sentence: median ${median.toFixed(0)}ms, min ${sorted[0]?.toFixed(0) ?? "-"}ms, ` +
-    `max ${sorted[sorted.length - 1]?.toFixed(0) ?? "-"}ms, budget 900ms`,
+    `max ${sorted[sorted.length - 1]?.toFixed(0) ?? "-"}ms, budget ${FIRST_SENTENCE_BUDGET_MS}ms`,
 );

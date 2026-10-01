@@ -5,46 +5,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { AnnotatedText } from "./AnnotatedText";
 import { DebriefCard } from "./DebriefCard";
 import { SprintTrack } from "./SprintTrack";
+import { SpeakButton } from "./SpeakButton";
 import { StreamedText } from "./StreamedText";
 import { useTurn } from "./useTurn";
-import { meanResponseMs } from "@/lib/measure";
+import { FIRST_SENTENCE_BUDGET_MS, meanResponseMs } from "@/lib/measure";
 import type { Debrief, FumbleDeckEntry, GrammarPoint, SessionState, Sprint, Turn } from "@/lib/types";
-
-const BUDGET_MS = 900;
-
-/**
- * Where the per-session reveal set is parked.
- *
- * The revealed words are a UI interaction state — they belong with the browser
- * rather than the database. sessionStorage (not localStorage) is the right
- * scope: the set survives a reload within the same tab, and dies with the tab,
- * which is the same lifetime as "the rest of the session" the learner is in.
- */
-const REVEALED_KEY_PREFIX = "japanese-trainer:revealed:";
-
-function loadRevealed(sessionId: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.sessionStorage.getItem(REVEALED_KEY_PREFIX + sessionId);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((s): s is string => typeof s === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveRevealed(sessionId: string, set: Set<string>): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(REVEALED_KEY_PREFIX + sessionId, JSON.stringify([...set]));
-  } catch {
-    // sessionStorage full or disabled: degrade silently. The reveal still holds
-    // for the rest of this session viewing; only the cross-reload persistence
-    // is lost.
-  }
-}
 
 /**
  * The conversation surface.
@@ -101,21 +66,42 @@ export function SessionView({ initial }: { initial: SessionState }) {
    */
   const [furiganaOn, setFuriganaOn] = useState<boolean>(initial.furiganaOn);
   /**
-   * Surface forms the learner has already tapped to reveal. Loaded from
-   * sessionStorage keyed on the session id, so a reload of the same session
-   * keeps the revealed words and a switch to a different session keeps a
-   * clean slate. A `ref` is held around it so `reveal` is a stable callback and
-   * AnnotatedText is not re-rendered on every tap.
+   * Surface forms the learner has already tapped to reveal. Seeded from the
+   * server, which is the only copy that counts: a reveal is part of the session,
+   * so it survives a reload, a fresh tab, and a second browser pointed at the
+   * same session. A `ref` is held around it so `reveal` stays a stable callback
+   * and the transcript is not re-rendered on every tap.
    */
-  const revealedRef = useRef<Set<string>>(loadRevealed(session.id));
+  const revealedRef = useRef<Set<string>>(new Set(initial.revealedReadings));
   const [, forceRender] = useState(0);
   const reveal = useCallback(
     (surface: string) => {
       const set = revealedRef.current;
       if (set.has(surface)) return;
+      // Optimistic: the ruby should appear under the finger, not a round-trip
+      // later. The server's post-mutation set replaces ours when it lands, so a
+      // reveal made in another tab still converges instead of forking.
       set.add(surface);
-      saveRevealed(session.id, set);
       forceRender((n) => n + 1);
+      void fetch(`/api/sessions/${session.id}/revealed`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ surface }),
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = (await response.json()) as { revealedReadings: string[] };
+          revealedRef.current = new Set(data.revealedReadings);
+          forceRender((n) => n + 1);
+        })
+        .catch((err) => {
+          // A reveal that did not land must not stay on screen pretending it
+          // did — it would read as "this is the session's state" and the learner
+          // would never tap the word again.
+          revealedRef.current.delete(surface);
+          forceRender((n) => n + 1);
+          console.error("reveal failed:", err);
+        });
     },
     [session.id],
   );
@@ -425,7 +411,7 @@ function LatencyChip({ ms, live }: { ms: number | null; live: boolean }) {
   if (live) return <span className="latency">waiting…</span>;
   if (ms === null) return <span className="latency">first sentence —</span>;
   return (
-    <span className="latency" data-over-budget={ms > BUDGET_MS ? "1" : "0"}>
+    <span className="latency" data-over-budget={ms > FIRST_SENTENCE_BUDGET_MS ? "1" : "0"}>
       first sentence {Math.round(ms)}ms
     </span>
   );
@@ -496,7 +482,12 @@ function Feed({
             className={`turn ${turn.role}${turn.kind === "drill" ? " drill" : ""}`}
             data-kind={turn.kind}
           >
-            <div className="who">{turn.role === "partner" ? "Partner" : "You"}</div>
+            <div className="who-row">
+              <div className="who">{turn.role === "partner" ? "Partner" : "You"}</div>
+              {turn.role === "partner" && turn.text.trim() ? (
+                <SpeakButton text={turn.text} />
+              ) : null}
+            </div>
             {turn.kind === "drill" ? (
               <div className="drill-label">drill — say it again</div>
             ) : null}
@@ -537,7 +528,12 @@ function Feed({
         <article className="turn partner">
           <div className="who">Partner</div>
           <div className="bubble jp streaming">
-            <StreamedText text={stream} />
+            <StreamedText
+              text={stream}
+              furiganaOn={furiganaOn}
+              revealed={revealed}
+              onReveal={onReveal}
+            />
           </div>
         </article>
       ) : null}
@@ -636,8 +632,8 @@ function Rail({
           </p>
         ) : null}
         <p className="note">
-          First sentence on screen: {latency === null ? "—" : `${Math.round(latency)}ms`} (budget
-          900ms). Timed in the browser, from submit to the first sentence being complete to read.
+          First sentence on screen: {latency === null ? "—" : `${Math.round(latency)}ms`} (budget {FIRST_SENTENCE_BUDGET_MS}ms). Timed in the
+          browser, from submit to the first sentence being complete to read.
         </p>
       </div>
 

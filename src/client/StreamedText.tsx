@@ -1,7 +1,7 @@
 "use client";
 
 import { splitSentences } from "@/lib/sentences";
-import { segmentForFurigana } from "@/lib/readings";
+import { FuriganaSpan, type FuriganaInput } from "./Furigana";
 
 /**
  * A partner turn while it is still arriving.
@@ -13,18 +13,10 @@ import { segmentForFurigana } from "@/lib/readings";
  *
  * Streaming text has no markers yet — those arrive with the metadata fence at
  * commit — so the rendering is just the furigana reading aid, no inline tags.
+ * It goes through the same `FuriganaSpan` the committed transcript uses, so a
+ * word that is a tap target mid-stream is the same tap target once it lands.
  */
-export function StreamedText({
-  text,
-  furiganaOn = false,
-  revealed,
-  onReveal,
-}: {
-  text: string;
-  furiganaOn?: boolean;
-  revealed?: ReadonlySet<string>;
-  onReveal?: (surface: string) => void;
-}) {
+export function StreamedText({ text, furiganaOn, revealed, onReveal }: FuriganaInput & { text: string }) {
   const { sentences, partial } = splitSentences(text);
   const complete = sentences.join("");
   return (
@@ -41,60 +33,4 @@ export function StreamedText({
       ) : null}
     </span>
   );
-}
-
-function FuriganaSpan({
-  text,
-  furiganaOn,
-  revealed,
-  onReveal,
-  className,
-}: {
-  text: string;
-  furiganaOn: boolean;
-  revealed: ReadonlySet<string> | undefined;
-  onReveal: ((surface: string) => void) | undefined;
-  className?: string;
-}) {
-  if (!text) return className ? <span className={className} /> : null;
-  const segs = segmentForFurigana(text);
-  const node = (
-    <>
-      {segs.map((seg, i) => {
-        if (seg.kind === "plain") return <span key={i}>{seg.text}</span>;
-        if (furiganaOn) {
-          return (
-            <ruby key={i}>
-              {seg.text}
-              <rt>{seg.reading}</rt>
-            </ruby>
-          );
-        }
-        if (seg.hard) {
-          if (revealed?.has(seg.text)) {
-            return (
-              <ruby key={i} className="revealed">
-                {seg.text}
-                <rt>{seg.reading}</rt>
-              </ruby>
-            );
-          }
-          return (
-            <button
-              key={i}
-              type="button"
-              className="kanji-tap"
-              data-surface={seg.text}
-              aria-label={`Reveal reading of ${seg.text}: ${seg.reading}`}
-              onClick={() => onReveal?.(seg.text)}
-            >
-              {seg.text}
-            </button>
-          );
-        }
-        return <span key={i}>{seg.text}</span>;
-      })}
-    </>
-  );
-  return className ? <span className={className}>{node}</span> : node;
 }

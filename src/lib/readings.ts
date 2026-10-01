@@ -208,34 +208,15 @@ const RAW: Record<string, Reading> = {
 const KANJI = /[一-鿿]/;
 
 /**
- * Keys with at least one kanji. Cached so the segmentation loop does not rescan.
- * Pure kana entries are kept in the dictionary for lookup completeness; they simply
- * never appear as ruby segments.
+ * Keys with at least one kanji, longest surface first. Cached and sorted once at
+ * module load so the segmentation loop neither rescans nor re-sorts. Pure-kana
+ * entries stay in the dictionary for documentation value — they record that the
+ * word is one the learner already reads unaided — but they can never produce a
+ * ruby segment, so the matcher skips them.
  */
 const KANJI_KEYS: string[] = Object.keys(RAW)
   .filter((k) => KANJI.test(k))
   .sort((a, b) => b.length - a.length);
-
-/**
- * Whether `key` contains any kanji. Pure-kana keys still live in RAW for
- * backwards compatibility but are filtered out of the matcher.
- */
-export function hasKanji(key: string): boolean {
-  return KANJI.test(key);
-}
-
-/**
- * The reading for a surface form, or undefined if the dictionary does not know
- * it. Pure-kana forms are returned only when explicitly registered.
- */
-export function lookup(surface: string): Reading | undefined {
-  return RAW[surface];
-}
-
-/** Whether the surface is in the dictionary AND has at least one kanji. */
-export function isKnown(surface: string): boolean {
-  return KANJI.test(surface) && RAW[surface] !== undefined;
-}
 
 /**
  * One pass of segmentation. The output alternates between dictionary matches and

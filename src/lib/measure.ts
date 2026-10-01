@@ -12,6 +12,18 @@ import type { Turn } from "@/lib/types";
  * Nothing in this file touches the environment, so the browser can import it.
  */
 
+/**
+ * What the partner's first sentence is held to, in the browser, from submit to
+ * the first sentence being complete to read. This is the spec's number rather
+ * than a target the partner is known to miss — see
+ * `docs/adr/0008-first-sentence-budget.md`.
+ *
+ * It lives here because three places state it: the header chip, the session
+ * rail, and the summary line `npm run probe:model` prints. As separate copies
+ * they drifted, and the probe went on reporting a budget the design had moved.
+ */
+export const FIRST_SENTENCE_BUDGET_MS = 1500;
+
 /** The response times recorded on a set of turns, in order. Unmeasured is skipped. */
 export function responseTimes(turns: Turn[]): number[] {
   return turns.flatMap((turn) => (turn.role === "learner" && turn.responseMs !== null ? [turn.responseMs] : []));

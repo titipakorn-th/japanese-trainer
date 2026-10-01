@@ -6,10 +6,7 @@
  * product is built around.
  */
 
-const HOSTS = {
-  cn: "https://api.minimaxi.com",
-  global: "https://api.minimax.io",
-} as const;
+import { regionHost, requireApiKey } from "./minimaxHost";
 
 export class ModelError extends Error {
   readonly retryable: boolean;
@@ -24,7 +21,6 @@ export function modelTimeoutMs(): number {
   const raw = Number(process.env.TURN_TIMEOUT_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 15_000;
 }
-
 function modelName(): string {
   return process.env.MINIMAX_MODEL || "abab6.5s-chat";
 }
@@ -33,8 +29,7 @@ function baseUrl(): string {
   // Point this at a local endpoint to exercise the failure and timeout paths —
   // a refused call, a hanging call — without spending a model call to do it.
   if (process.env.MOCK_MODEL_URL) return process.env.MOCK_MODEL_URL;
-  const region = process.env.MINIMAX_REGION === "global" ? "global" : "cn";
-  return `${HOSTS[region]}/v1/chat/completions`;
+  return `${regionHost()}/v1/chat/completions`;
 }
 
 interface StreamOptions {
@@ -58,12 +53,13 @@ interface StreamOptions {
  * straight into the first sentence the learner sees.
  */
 export async function streamChat({ messages, signal, onDelta }: StreamOptions): Promise<string> {
-  const apiKey = process.env.MINIMAX_API_KEY;
-  if (!apiKey) {
-    throw new ModelError(
-      "MINIMAX_API_KEY is not set. Copy .env.example to .env.local and add the key.",
-      false,
-    );
+  // A missing key is still a `ModelError`, because everything upstream of this
+  // catches that and nothing catches a `MiniMaxAuthError`.
+  let apiKey: string;
+  try {
+    apiKey = requireApiKey();
+  } catch (error) {
+    throw new ModelError(error instanceof Error ? error.message : "No API key.", false);
   }
 
   const response = await fetch(baseUrl(), {
