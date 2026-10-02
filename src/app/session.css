@@ -3,6 +3,17 @@
 .shell {
   display: grid;
   grid-template-columns: 1fr 300px;
+  /*
+   * `minmax(0, 1fr)` and not the default `auto`.
+   *
+   * The row is sized to fit the viewport, and `0` as the minimum is what lets
+   * the two scroll regions inside the chat column — the transcript and, once a
+   * session is over, the summary — divide the height between them. Left as
+   * `auto`, the row grows to fit the tallest of them instead, the column grows
+   * with it, and the summary ends up below the bottom of the window with the
+   * page scrolled sideways to reach it.
+   */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -10,7 +21,17 @@
   .shell {
     grid-template-columns: 1fr;
   }
-  .rail {
+
+  /*
+   * Written as a descendant, and it has to be.
+   *
+   * This block sits at the top of the file and the base `.rail` rule is a
+   * hundred lines below it, so a bare `.rail { display: none }` here loses to
+   * it on order at equal specificity — which is why the rail kept appearing on
+   * a phone and pushed the end-of-session summary a full screen further down.
+   * Two classes settles it wherever the rule is defined.
+   */
+  .shell .rail {
     display: none;
   }
 }
@@ -19,6 +40,10 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* Same reason as the grid row above: a flex column will not shrink below its
+     content unless it is told it may, and the content here is two panels that
+     both scroll. */
+  min-height: 0;
   height: 100%;
 }
 
@@ -729,6 +754,14 @@
 
 /* ------------------------------------------------------------------- wrap */
 
+/*
+ * The wrap panel replaces the composer when the session is over, and it shares
+ * the column with the transcript rather than replacing it: reviewing what you
+ * actually said is half of what makes a session worth reviewing, so the feed
+ * stays a live scroll region above. The panel is capped rather than allowed to
+ * grow, and scrolls itself, so a long summary never squeezes the transcript down
+ * to a sliver.
+ */
 .wrap {
   border-top: 1px solid var(--line);
   background: var(--panel);
@@ -737,6 +770,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
+  max-height: 58%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .wrap h2 {
@@ -758,6 +794,183 @@
   padding: 13px 20px;
   border-radius: 10px;
   text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- summary */
+
+.summary {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.summary-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.summary-lines li {
+  font: 500 13.5px/1.6 var(--ui);
+  color: var(--ink);
+}
+
+/* One bar per learner turn, scaled against the slowest of the session. */
+
+.pace {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.pace figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font: 600 10.5px/1.3 var(--ui);
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pace-scale {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.pace-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pace-col {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.pace-bar {
+  display: block;
+  width: 100%;
+  /* Capped and centred in its column, so a session with three turns reads as
+     three measurements rather than three slabs, and a long one reads as a
+     histogram rather than a solid block. */
+  max-width: 20px;
+  margin: 0 auto;
+  border-radius: 3px 3px 0 0;
+  background: var(--new);
+  opacity: 0.85;
+}
+
+/* A turn the browser could not time still happened, so it keeps its bar — drawn
+   hollow, so a missing measurement is never mistaken for a fast answer. */
+.pace-col[data-timed="0"] .pace-bar {
+  background: transparent;
+  border: 1px dashed var(--ink-faint);
+  border-bottom: 0;
+  opacity: 0.8;
+}
+
+/* Amber is the fumble colour everywhere else in the app, and a walk-away is the
+   failure this product measures most precisely, so it gets the colour rather
+   than a footnote. */
+.pace-col[data-bail="1"] .pace-bar {
+  background: var(--fumble);
+  opacity: 1;
+}
+
+.pace-mean {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--ink-dim);
+}
+
+.pace-scene {
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--ink-faint);
+  opacity: 0.55;
+}
+
+.summary-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fact {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+
+.fact dt {
+  font: 600 10px/1.3 var(--ui);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.fact dd {
+  margin: 4px 0 0;
+  font: 700 15px/1.1 var(--ui);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.fact[data-tone="fumble"] {
+  background: var(--fumble-soft);
+  border-color: #5c451a;
+}
+
+.fact[data-tone="fumble"] dd {
+  color: var(--fumble-ink);
+}
+
+.summary-words {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.summary-words-head {
+  font: 600 10.5px/1.3 var(--ui);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-deck {
+  color: var(--ink-dim) !important;
+}
+
+@media (max-width: 620px) {
+  .summary-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wrap {
+    max-height: 64%;
+  }
 }
 
 .thinking {
@@ -1486,6 +1699,72 @@ ruby.revealed rt {
   margin: 0;
   font: 500 13.5px/1.65 var(--ui);
   color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ start */
+
+/*
+ * What the learner is walking into, shown before they commit to it.
+ *
+ * Two slots, always both present, because "nothing yet" is itself worth reading:
+ * a deck of zero is a good sign, and a learner who has never finished a session
+ * should be told that plainly rather than shown a blank where last time's
+ * numbers would be.
+ */
+.standing {
+  width: 100%;
+  max-width: 620px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.standing-item {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.standing-label {
+  font: 600 10.5px/1.3 var(--ui);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.standing-value {
+  font: 700 19px/1.2 var(--ui);
+  color: var(--ink);
+}
+
+.standing-note {
+  font: 500 12px/1.5 var(--ui);
+  color: var(--ink-dim);
+}
+
+/* The deck is the work waiting, so it takes the teal the deck uses everywhere
+   else — and loses it when there is nothing owed, which is the good state. */
+.standing-item[data-tone="deck"] {
+  background: var(--deck-soft);
+  border-color: #1c4d47;
+}
+
+.standing-item[data-tone="deck"] .standing-value {
+  color: var(--deck-ink);
+}
+
+.standing-item[data-tone="calm"] .standing-value {
+  color: var(--deck-ink);
+}
+
+@media (max-width: 560px) {
+  .standing {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .scenarios {

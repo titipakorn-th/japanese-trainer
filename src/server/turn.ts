@@ -23,6 +23,7 @@ import {
 import {
   getFumbleDeck,
   getFumbleDeckSize,
+  getSessionFumbles,
   insertFumbles,
   worstFumbleForSprint,
   type DetectedFumble,
@@ -444,6 +445,7 @@ export async function runTurn(
       );
 
       const fumbleDeck = getFumbleDeck();
+      const sessionFumbles = getSessionFumbles(sessionId);
 
       emit({
         t: "done",
@@ -456,6 +458,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        fumbles: sessionFumbles,
       });
       return;
     }
@@ -559,6 +562,7 @@ export async function runTurn(
 
     const status = result.nextSprint ? "active" : "ended";
     const fumbleDeck = getFumbleDeck();
+    const sessionFumbles = getSessionFumbles(sessionId);
     emit({
       t: "done",
       learnerTurn: result.learnerTurn,
@@ -576,6 +580,7 @@ export async function runTurn(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      fumbles: sessionFumbles,
     });
 
     if (result.drillTurn) {
@@ -596,6 +601,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        fumbles: sessionFumbles,
       });
     }
 
@@ -611,6 +617,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        fumbles: sessionFumbles,
       });
     }
   } catch (err) {
@@ -686,6 +693,7 @@ async function handleDrillResponse(
     responseMs,
   );
   const fumbleDeck = getFumbleDeck();
+  const sessionFumbles = getSessionFumbles(sessionId);
 
   /**
    * Pick the sprint the partner's continuation belongs to.
@@ -723,6 +731,7 @@ async function handleDrillResponse(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      fumbles: sessionFumbles,
     });
     void drilled;
     return;
@@ -837,6 +846,7 @@ async function handleDrillResponse(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      fumbles: sessionFumbles,
     });
     void drilled;
   } catch (err) {

@@ -200,6 +200,26 @@ export function getSprintFumbles(sprintId: string): Fumble[] {
 }
 
 /**
+ * Every fumble a session caught, in order.
+ *
+ * Scoped to one session so the end-of-session summary can report what this
+ * sitting actually cost the learner without re-deriving it from the deck: a
+ * word the learner fumbled last week is not this session's doing, and a word
+ * they cleared yesterday is not a moment to show them again today.
+ *
+ * Cleared moments are included. A summary is an account of what happened, and a
+ * fumble that was later produced unprompted still happened.
+ */
+export function getSessionFumbles(sessionId: string): Fumble[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM fumble WHERE session_id = ? ORDER BY created_at ASC, id ASC`,
+    )
+    .all(sessionId) as FumbleRow[];
+  return rows.map(toFumble);
+}
+
+/**
  * Mark every uncleared, undrilled moment of one natural form as drilled.
  *
  * Called from inside the turn transaction after the learner successfully retried

@@ -88,3 +88,23 @@ textarea {
 a {
   color: inherit;
 }
+
+/*
+ * Text that is in the accessibility tree but not on screen.
+ *
+ * The session summary draws its per-turn chart as bars, so the numbers behind
+ * them are announced rather than seen. This is the one place the app relies on
+ * it, and it has to be a clip rather than a `display: none`, which would remove
+ * the text from the tree it exists to serve.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
