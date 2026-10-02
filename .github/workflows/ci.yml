@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # No `engines` field in package.json, but the toolchain is developed and
+          # verified on 24 and the native `better-sqlite3` build assumes it.
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # This is the real cold-start migration, not a simulation of it: a fresh
+      # checkout has no `data/`, so a pool of page-data workers races to create
+      # and migrate the same file. That is the first thing a new contributor ever
+      # runs, so it is the thing CI should not skip. `probe:migrate` below then
+      # races it deliberately, with the deaths split by cause.
+      - run: npm run build
+
+      - run: npm run probe:migrate
+
+      # The reading aid has no unit seam, so its invariants are asserted here
+      # instead: the reveal set is server-owned and one renderer draws it. See
+      # the section in CLAUDE.md for why it needs saying out loud.
+      - run: npm run probe:reading-aid
+
+      # `probe:model` is deliberately absent. It needs MINIMAX_API_KEY, it spends
+      # a model call per case, and it measures first-sentence latency against
+      # whichever models are currently reachable rather than asserting anything
+      # about this codebase. It is a tool for a person deciding on a model
+      # (docs/adr/0001-conversation-partner-model.md), not a gate. The other two
+      # probes need no secrets and cost nothing.

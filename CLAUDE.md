@@ -37,6 +37,10 @@ Point `MOCK_MODEL_URL` at a local endpoint to exercise the model failure and
 timeout paths without spending a model call. `MOCK_TTS_URL` does the same for the
 voice service, without spending characters.
 
+CI runs `typecheck`, `build`, `probe:migrate` and `probe:reading-aid`, and needs no
+secrets — see `.github/workflows/ci.yml` for why `probe:model` is deliberately not
+one of them.
+
 ## Do not rebuild under a running server
 
 `next start` serves whatever build is in `.next` when it boots, and `next build`
