@@ -25,3 +25,21 @@ export function distinctNewWords(turns: Turn[]): Pick<Marker, "surface" | "readi
   }
   return out;
 }
+
+/**
+ * How many distinct Fumble Deck words the partner put back in play.
+ *
+ * A count rather than the list, because the only caller is the consolidation-day
+ * line, which needs to say how many were drilled and not what they were. The
+ * deck marker deliberately carries no reading or meaning, so there is nothing to
+ * list even if a caller wanted to.
+ */
+export function distinctDeckWordCount(turns: Turn[]): number {
+  const seen = new Set<string>();
+  for (const turn of turns) {
+    for (const marker of turn.markers) {
+      if (marker.kind === "deck") seen.add(marker.surface);
+    }
+  }
+  return seen.size;
+}

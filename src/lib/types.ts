@@ -404,6 +404,17 @@ export interface SessionState {
    */
   words: WordLedger;
   /**
+   * Whether the conversation has shown enough strain that the planner has
+   * stopped spending New Words for the rest of the session.
+   *
+   * Derived from committed turns on every snapshot, never stored: a flag that can
+   * disagree with the transcript is the fault this project keeps paying for, and
+   * a reload must reach the same answer. `false` on an uncalibrated build, so the
+   * learner sees no change at all until the thresholds exist.
+   * See `docs/adr/0013-strain-signals.md`.
+   */
+  strained: boolean;
+  /**
    * Every fumble this session caught, in order.
    *
    * Not the deck — the moments. The end-of-session summary needs them to say how
@@ -459,6 +470,16 @@ export interface Committed {
    * seen — the same rule as the deck above it.
    */
   words: WordLedger;
+  /**
+   * The same strain flag as on `SessionState`, on the commit frame as well.
+   *
+   * The gate is read fresh on every model call rather than latched at the first
+   * time it fires, so a session that is under strain stays that way and a
+   * session that is not never claims to be. Carrying it here means the rail can
+   * say so the moment it becomes true, without a reload and without the client
+   * deriving it.
+   */
+  strained: boolean;
   /**
    * This session's fumbles as they stand after this commit.
    *

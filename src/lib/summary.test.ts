@@ -398,3 +398,110 @@ test("a gap too small to mean anything is treated as flat", () => {
   assert.equal(s.deltaMs, null);
   assert.doesNotMatch(summaryLines(s).join(" "), /getting quicker|slowed down/i);
 });
+
+/**
+ * The consolidation day. Issue #10 asks for a session that stopped injecting to
+ * say so plainly, and to report the words it actually met rather than a fraction
+ * of ten. The tests below are mostly about the second half of that: the numbers
+ * in the line have to be the transcript's numbers, and the line has to stay
+ * silent on a session that was not strained — including on a build whose
+ * thresholds have not been calibrated yet, which is every build until real
+ * sessions exist to calibrate them from.
+ */
+
+const newWord = (surface: string): Marker => ({
+  id: `m-${surface}`,
+  kind: "new",
+  start: 0,
+  end: surface.length,
+  surface,
+  reading: "よみ",
+  meaning: "a word",
+  example: "",
+});
+
+const deckWord = (surface: string): Marker => ({
+  id: `d-${surface}`,
+  kind: "deck",
+  start: 0,
+  end: surface.length,
+  surface,
+  reading: "",
+  meaning: "",
+  example: "",
+});
+
+test("a strained session leads with the consolidation day and the words it met", () => {
+  const turns = [
+    turn({ role: "partner", seq: 0, markers: [newWord("会計"), newWord("伝票"), newWord("箸")] }),
+    turn({ role: "partner", seq: 1, markers: [deckWord("辛口"), deckWord("冷酒"), deckWord("枝豆"), deckWord("お通し")] }),
+  ];
+
+  const lines = summaryLines(buildSummary(session, turns, [], [], true));
+
+  assert.match(lines[0]!, /^Consolidation day — 3 new words met, 4 deck words drilled under pressure\./);
+  assert.match(lines[0]!, /A word you failed and then met again is the part that sticks\./);
+});
+
+test("the consolidation day counts the words in the transcript, not a fraction of the target", () => {
+  // The trap this guards is the one issue #10 names: three words against a target
+  // of ten, reported as "3/10", which is true and reads as a session that failed.
+  // The number the learner gets is the number that was met.
+  const turns = [
+    turn({ role: "partner", seq: 0, markers: [newWord("会計"), newWord("伝票")] }),
+    turn({ role: "partner", seq: 1, markers: [deckWord("辛口")] }),
+  ];
+
+  const line = summaryLines(buildSummary(session, turns, [], [], true))[0]!;
+
+  assert.match(line, /2 new words met/);
+  assert.doesNotMatch(line, /\d+\s*\/\s*10/, "a fraction of the target is not what happened");
+  assert.doesNotMatch(line, /10/, "the target is not a number the session was judged against");
+});
+
+test("the consolidation day does not claim deck drills that did not happen", () => {
+  // A session that went strained on turn two has had no chance to put a deck word
+  // back in play. Borrowing a sentence about words the learner never met again
+  // would be a flattering line about work that did not happen.
+  const turns = [turn({ role: "partner", seq: 0, markers: [newWord("会計")] })];
+
+  const line = summaryLines(buildSummary(session, turns, [], [], true))[0]!;
+
+  assert.match(line, /^Consolidation day — 1 new word met\./);
+  assert.doesNotMatch(line, /drilled/, "nothing was drilled, so nothing is claimed");
+  assert.match(line, /new words only/);
+});
+
+test("a session that was not strained never mentions consolidation", () => {
+  const turns = [turn({ role: "partner", seq: 0, markers: [newWord("会計")] })];
+
+  const s = buildSummary(session, turns, [], [], false);
+
+  assert.equal(s.strained, false);
+  assert.doesNotMatch(summaryLines(s).join(" "), /consolidation/i);
+});
+
+test("strained defaults to false, so an uncalibrated build says nothing", () => {
+  // The gate's thresholds are null until real sessions exist to read them off, so
+  // this default is what every build does today. A summary that claimed a
+  // consolidation day on a build whose gate cannot fire would be a lie the
+  // learner has no way to check.
+  const turns = [turn({ role: "partner", seq: 0, markers: [newWord("会計")] })];
+
+  const s = buildSummary(session, turns, [], []);
+
+  assert.equal(s.strained, false);
+  assert.doesNotMatch(summaryLines(s).join(" "), /consolidation/i);
+});
+
+test("deck words are counted once however often the partner reuses them", () => {
+  const turns = [
+    turn({ role: "partner", seq: 0, markers: [deckWord("辛口")] }),
+    turn({ role: "partner", seq: 1, markers: [deckWord("辛口"), deckWord("冷酒")] }),
+  ];
+
+  const s = buildSummary(session, turns, [], [], true);
+
+  assert.equal(s.deckWords, 2, "a reused deck word is still one word");
+  assert.match(summaryLines(s)[0]!, /2 deck words drilled/);
+});

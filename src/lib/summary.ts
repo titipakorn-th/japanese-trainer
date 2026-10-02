@@ -1,5 +1,5 @@
 import { humanDuration, humanMs, meanMs, responseTimes } from "./measure";
-import { distinctNewWords } from "./words";
+import { distinctDeckWordCount, distinctNewWords } from "./words";
 import type { Fumble, Marker, Session, Sprint, Turn } from "./types";
 
 /**
@@ -84,6 +84,19 @@ export interface SessionSummary {
   deck: DeckOutcome;
   /** Distinct New Words the partner introduced. */
   words: Pick<Marker, "surface" | "reading" | "meaning">[];
+  /** Distinct Fumble Deck words put back in play. Counted, not listed. */
+  deckWords: number;
+  /**
+   * Whether the planner stopped spending New Words partway through, because the
+   * conversation showed strain.
+   *
+   * Passed in rather than derived here: this module is imported by the browser
+   * as well as the server, and the gate belongs to the server. It is a derived
+   * value wherever it comes from — never a stored flag — so a reload reaches the
+   * same answer. `false` on an uncalibrated build, which means the line below
+   * simply does not appear. See `docs/adr/0013-strain-signals.md`.
+   */
+  strained: boolean;
   sprintsClosed: number;
   sprintsPlanned: number;
   /** Wall-clock length of the sitting. */
@@ -132,6 +145,7 @@ export function buildSummary(
   turns: Turn[],
   sprints: Sprint[],
   fumbles: Fumble[],
+  strained = false,
 ): SessionSummary {
   const sprintSeqById = new Map(sprints.map((s) => [s.id, s.seq]));
   const learnerTurns = turns.filter((t) => t.role === "learner");
@@ -191,6 +205,8 @@ export function buildSummary(
     fumbles: fumbles.length,
     deck: deckOutcome(fumbles),
     words: distinctNewWords(turns),
+    deckWords: distinctDeckWordCount(turns),
+    strained,
     sprintsClosed: sprints.filter((s) => s.status === "closed").length,
     sprintsPlanned: sprints.length,
     durationMs: Math.max(0, endedAt - session.createdAt),
@@ -207,6 +223,27 @@ export function buildSummary(
  */
 export function summaryLines(s: SessionSummary): string[] {
   const lines: string[] = [];
+
+  // The consolidation day leads, because it is the frame for every number below
+  // it. A session that met six words out of a target of ten reads as a failure
+  // against a grid and as a consolidation day against a reason, and the learner
+  // should have the reason before the arithmetic.
+  //
+  // It never claims drills that did not happen. "4 deck words drilled under
+  // pressure" is a statement about the transcript, and on a session where the
+  // deck never came up there is nothing to claim — so that case says so instead
+  // of borrowing a sentence about words the learner never met again.
+  if (s.strained) {
+    const met = s.words.length;
+    const word = met === 1 ? "word" : "words";
+    const drilled = s.deckWords;
+    const deckClause =
+      drilled > 0
+        ? `, ${drilled} deck ${drilled === 1 ? "word" : "words"} drilled under pressure. ` +
+          `A word you failed and then met again is the part that sticks.`
+        : `. No deck words came back up, so this was new words only.`;
+    lines.push(`Consolidation day — ${met} new ${word} met${deckClause}`);
+  }
 
   // How long the sitting took and how much of it the learner answered for. The
   // sign-off this replaced said both, and a summary that dropped them to make
