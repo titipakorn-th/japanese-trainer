@@ -207,12 +207,23 @@ export function metWords(turns: Turn[], limit = MET_WORDS_FOR_PROMPT): string[] 
  * its budget does not get to cram a fourth word into a scene that already has
  * three — the cap is the one that keeps a conversation from stalling, and the
  * target is explicitly a target.
+ *
+ * A strained session outranks both. Once the conversation has shown strain the
+ * allowance is zero regardless of what the target says, and the whole remaining
+ * budget moves to the Fumble Deck, because a tenth new word bought with a
+ * stalled scene is a word the learner reads rather than one they speak. This is
+ * the whole of issue #10's mechanism: the prompt already renders a zero
+ * allowance as "new は0個" plus the deck instruction, so the gate does not have
+ * to touch the prompt at all. See `docs/adr/0013-strain-signals.md`.
  */
 export function newWordAllowance(
   turns: Turn[],
   sprint: Sprint | null,
   sprints: Sprint[],
+  strained = false,
 ): { thisSprint: number; thisTurn: number } {
+  if (strained) return { thisSprint: 0, thisTurn: 0 };
+
   const budget = wordBudget(sprints.length || 1);
   // No sprint means the scene has not been opened, so it has spent nothing and
   // both the sprint and the per-turn allowance are at their ceiling.

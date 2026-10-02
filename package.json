@@ -13,7 +13,8 @@
     "probe:tts": "tsx scripts/probe-tts.ts",
     "probe:migrate": "tsx scripts/probe-migrate.ts",
     "probe:cold-start": "tsx scripts/probe-cold-start.ts",
-    "probe:reading-aid": "tsx scripts/probe-reading-aid.ts"
+    "probe:reading-aid": "tsx scripts/probe-reading-aid.ts",
+    "probe:strain-data": "tsx scripts/probe-strain-data.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

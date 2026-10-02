@@ -171,6 +171,7 @@ export function useTurn(sessionId: string) {
                 fumbleDeckSize: event.fumbleDeckSize,
                 fumbleDeck: event.fumbleDeck,
                 words: event.words,
+                strained: event.strained,
                 fumbles: event.fumbles,
               });
               result = {

@@ -3,6 +3,7 @@ import { db } from "./db";
 import { DEFAULT_SCENARIO, getBrief, getScenario } from "./scenarios";
 import { pacing, sprintsPerSession } from "./pacing";
 import { buildWordLedger } from "./words";
+import { isStrained } from "./strain";
 import { buildDebrief } from "./debrief";
 import { clearDeckNaturals, getFumbleDeck, getSessionFumbles, insertFumbles, markFumblesDrilledByNatural, type DetectedFumble } from "./fumbles";
 import { getGrammarPoint, pickGrammarPoint } from "./grammarPoints";
@@ -307,6 +308,10 @@ export function getSessionState(id: string): SessionState | null {
     // committed turns so a reload shows the slots actually filled rather than
     // ten empty pips and a learner wondering whether the session lost its work.
     words: buildWordLedger(getTurns(id), sprints.length),
+    // Derived from the same committed turns as the ledger above, for the same
+    // reason: nothing here is counted, so a reload cannot disagree with the
+    // transcript. `false` until the thresholds in ADR 0013 are calibrated.
+    strained: isStrained(getTurns(id), getSessionFumbles(id)),
     fumbles: getSessionFumbles(id),
     furiganaOn: session.furiganaOn,
     revealedReadings: session.revealedReadings,

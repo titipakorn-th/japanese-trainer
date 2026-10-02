@@ -49,6 +49,16 @@ export function SessionView({ initial }: { initial: SessionState }) {
   );
   const noScene = initial.session.status === "active" && initial.activeSprint === null;
   /**
+   * Whether the server has decided this session is strained.
+   *
+   * Server-owned rather than derived here, for the same reason the deck is: the
+   * gate lives in the turn path and is read fresh on every model call, so the
+   * client would have to re-implement a decision it is not making. Held as state
+   * so the label appears on the frame that made it true, and seeded from the
+   * snapshot so a reload of a finished session says the same thing it said live.
+   */
+  const [strained, setStrained] = useState(initial.strained);
+  /**
    * Whether the learner walked away from this session, read off the sprints.
    *
    * This was a local flag set by the End button, which is the one piece of the
@@ -205,6 +215,7 @@ export function SessionView({ initial }: { initial: SessionState }) {
         // read the turns.
         setWords(lastCommit.words);
         setFumbles(lastCommit.fumbles);
+        setStrained(lastCommit.strained);
       } else {
         // The conversation did not advance. The draft was never touched, so the
         // typed text is still in the field, ready to retry.
@@ -303,8 +314,8 @@ export function SessionView({ initial }: { initial: SessionState }) {
    * second request and no summary endpoint to fall out of step with the transcript.
    */
   const summary = useMemo(
-    () => buildSummary(session, turns, sprints, fumbles),
-    [session, turns, sprints, fumbles],
+    () => buildSummary(session, turns, sprints, fumbles, strained),
+    [session, turns, sprints, fumbles, strained],
   );
 
   return (

@@ -8,6 +8,7 @@ import {
 } from "./parse";
 import { readStance, type Spoken, type Stance } from "./stance";
 import { buildWordLedger, metWords, newWordAllowance, targetDeckWords } from "./words";
+import { isStrained } from "./strain";
 import { closeSprint, sessionExpired, pacing } from "./pacing";
 import {
   commitBoundary,
@@ -30,6 +31,7 @@ import {
 } from "./fumbles";
 import { fumbleMarkers } from "./fumbleMarkers";
 import type {
+  Fumble,
   Marker,
   SessionStatus,
   Sprint,
@@ -158,6 +160,19 @@ function committedWords(sessionId: string): WordLedger {
 }
 
 /**
+ * Whether this session is strained, as of the turns committed so far.
+ *
+ * Read fresh on every frame rather than latched, so the flag is always a
+ * statement about the transcript as it stands. A latched flag would also be
+ * correct in the common case and wrong in the one that matters: a session
+ * measured as strained on turn four and healthy by turn nine would keep its
+ * label, and the label is a claim about the whole conversation.
+ */
+function committedStrain(sessionId: string, fumbles: Fumble[]): boolean {
+  return isStrained(getTurns(sessionId), fumbles);
+}
+
+/**
  * The two New Word fields every call needs, read fresh from committed turns.
  *
  * Both are derived rather than carried: a counter incremented on commit would
@@ -178,7 +193,7 @@ function wordContext(
     // short sign-off, and a word woven into it is a word used in the least
     // useful sentence in the sprint.
     metWords: moment === "closing" ? [] : metWords(turns),
-    allowance: newWordAllowance(turns, sprint, sprints),
+    allowance: newWordAllowance(turns, sprint, sprints, isStrained(turns, getSessionFumbles(sessionId))),
   };
 }
 
@@ -443,6 +458,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        strained: committedStrain(sessionId, sessionFumbles),
         fumbles: sessionFumbles,
       });
       return;
@@ -565,6 +581,7 @@ export async function runTurn(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      strained: committedStrain(sessionId, sessionFumbles),
       fumbles: sessionFumbles,
     });
 
@@ -586,6 +603,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        strained: committedStrain(sessionId, sessionFumbles),
         fumbles: sessionFumbles,
       });
     }
@@ -602,6 +620,7 @@ export async function runTurn(
         fumbleDeckSize: fumbleDeck.length,
         fumbleDeck,
         words: committedWords(sessionId),
+        strained: committedStrain(sessionId, sessionFumbles),
         fumbles: sessionFumbles,
       });
     }
@@ -716,6 +735,7 @@ async function handleDrillResponse(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      strained: committedStrain(sessionId, sessionFumbles),
       fumbles: sessionFumbles,
     });
     void drilled;
@@ -831,6 +851,7 @@ async function handleDrillResponse(
       fumbleDeckSize: fumbleDeck.length,
       fumbleDeck,
       words: committedWords(sessionId),
+      strained: committedStrain(sessionId, sessionFumbles),
       fumbles: sessionFumbles,
     });
     void drilled;
