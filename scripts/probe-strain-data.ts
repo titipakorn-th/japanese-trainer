@@ -43,6 +43,16 @@ const db = new Database(path.join(DATA_DIR, name), { readonly: true });
 // move.
 const { MIN_STRAIN_SAMPLES: MIN_SAMPLES, strainGateArmed } = await import("@/server/strain");
 
+/**
+ * A gap longer than this means the tab was away, not that the learner hesitated.
+ *
+ * The same ten minutes the server uses to discard an implausible `response_ms`,
+ * and deliberately so: a turn the browser cannot honestly time becomes a null in
+ * the store, and this is that null's cause made visible rather than a second
+ * place that decides where the line sits.
+ */
+const IDLE_GAP_MS = 10 * 60_000;
+
 interface Sample {
   sessionId: string;
   seq: number;
@@ -59,10 +69,23 @@ const sessions = db
 
 const turnRows = db
   .prepare(
-    `SELECT session_id, seq, response_ms FROM turn
+    `SELECT session_id, seq, response_ms, created_at FROM turn
      WHERE role = 'learner' ORDER BY session_id, seq`,
   )
-  .all() as { session_id: string; seq: number; response_ms: number | null }[];
+  .all() as { session_id: string; seq: number; response_ms: number | null; created_at: number }[];
+
+/**
+ * Every turn in the session, both roles, for the idle-gap check.
+ *
+ * Learner turns alone would miss the case that matters most. A Session opened
+ * and then left has exactly one learner turn, so the gap between learner turns
+ * is undefined — but the 107 minutes between the partner's opening and the
+ * learner's eventual reply is the whole story, and it is only visible if the
+ * opening is in the sequence.
+ */
+const allTurnRows = db
+  .prepare(`SELECT session_id, created_at FROM turn ORDER BY session_id, seq`)
+  .all() as { session_id: string; created_at: number }[];
 
 const fumbleRows = db
   .prepare(`SELECT session_id, reason FROM fumble`)
@@ -90,6 +113,7 @@ const short = (ms: number): string =>
 console.log(`store: data/${name}\n`);
 
 let usableCount = 0;
+let idleCount = 0;
 const allUsable: number[] = [];
 
 for (const session of sessions) {
@@ -97,7 +121,36 @@ for (const session of sessions) {
   const shortId = session.id.slice(0, 6);
   const fumbles = fumblesBySession.get(session.id) ?? 0;
   const usable = samples.length >= MIN_SAMPLES;
-  if (usable) {
+
+  // The gap between consecutive learner turns, which is the difference between a
+  // Session practised and a Session opened and left.
+  //
+  // `cd8bd5` is the case this exists for: opened at 23:44, one turn typed at
+  // 01:31, 107 minutes later. It shows up in the store as a Session with a
+  // learner turn and a real 6.0s compose time, and "too few samples" is a true
+  // but useless thing to be told about it — the samples are not too few, the
+  // Session is not practice. Without the gap the probe cannot say which of the
+  // two it is, and a learner told only "too few" has no idea what to do differently.
+  //
+  // The threshold is the same ten minutes the server uses to discard an
+  // implausible timing, deliberately: a turn the browser could not measure
+  // because the tab was away for an hour is a null, and this is that null's
+  // visible cause rather than a second place that decides where the line is.
+  const at = allTurnRows
+    .filter((r) => r.session_id === session.id)
+    .map((r) => r.created_at)
+    .sort((a, b) => a - b);
+  let largestGapMs = 0;
+  for (let i = 1; i < at.length; i += 1) {
+    largestGapMs = Math.max(largestGapMs, at[i]! - at[i - 1]!);
+  }
+  const idle = largestGapMs > IDLE_GAP_MS;
+  if (idle) idleCount += 1;
+  // An idle Session never counts towards the pool, however many timings it
+  // happens to contain. Its samples are real measurements of a learner who was
+  // there — but they are not samples of a conversation, and letting them into
+  // the pool would be the one way this probe could lie convincingly.
+  if (usable && !idle) {
     usableCount += 1;
     allUsable.push(...samples.map((s) => s.ms));
   }
@@ -105,7 +158,8 @@ for (const session of sessions) {
   if (samples.length === 0) {
     console.log(
       `  --      ${shortId}  ${session.scenario}  ${session.status}  ` +
-        `no measured compose times — 1st turn of a session is never measured`,
+        `no measured compose times — 1st turn of a session is never measured` +
+        (idle ? `  (idle: sat ${short(largestGapMs)} between turns)` : ""),
     );
     continue;
   }
@@ -116,15 +170,16 @@ for (const session of sessions) {
   const delta =
     first !== null && second !== null && first > 0 ? ((second - first) / first) * 100 : null;
 
-  const trend =
-    !usable
+  const trend = idle
+    ? `IDLE — sat ${short(largestGapMs)} between turns, so this is not practice`
+    : !usable
       ? `too few to split (need ${MIN_SAMPLES})`
       : delta === null
         ? "no trend"
         : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% first half -> second half`;
 
   console.log(
-    `  ${usable ? "ok  " : "thin"}    ${shortId}  ${session.scenario}  ${session.status}  ` +
+    `  ${usable ? "ok  " : idle ? "idle" : "thin"}  ${shortId}  ${session.scenario}  ${session.status}  ` +
       `${samples.length} measured  ${trend}  ` +
       `times: ${samples.map((s) => short(s.ms)).join(" ")}  fumbles: ${fumbles}`,
   );
@@ -137,7 +192,10 @@ const max = sorted[sorted.length - 1] ?? 0;
 
 console.log(
   `\n${usableCount} of ${sessions.length} Sessions can carry a threshold ` +
-    `(${MIN_SAMPLES}+ measured compose times each).`,
+    `(${MIN_SAMPLES}+ measured compose times each).` +
+    (idleCount > 0
+      ? ` ${idleCount} excluded as idle — opened and left, not practised.`
+      : ""),
 );
 
 if (sorted.length > 0) {
@@ -156,9 +214,14 @@ if (sorted.length > 0) {
 if (usableCount === 0) {
   console.log(
     "\nNo Session has enough measured compose times to split into halves. A\n" +
-      "threshold set now would be estimation, which is what the ADR forbids.\n" +
-      "Practise Sessions to the end — 3 closed scenes clears the floor —\n" +
-      "then run this again.",
+      "threshold set now would be estimation, which is what the ADR forbids." +
+      (idleCount > 0
+        ? "\n\nThe rows marked idle are not a near miss — the tab was away for hours,\n" +
+          "so those Sessions are burnt whatever you do with them now. A Session has\n" +
+          "to be started and finished in one sitting: 3 closed scenes clears the floor\n" +
+          "of 4 measured turns."
+        : "\n\nPractise Sessions to the end — 3 closed scenes clears the floor of 4\n" +
+          "measured turns — then run this again."),
   );
 }
 

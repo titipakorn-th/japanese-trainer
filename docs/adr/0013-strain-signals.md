@@ -35,6 +35,17 @@ developer smoke-tests — `昨日{Shibuya}は雨がふって没有得到罗马`,
 `Yeah, umm, five, uh, spicy please`, and one with a Korean word in it. Of the
 remaining twelve, only one session has a multi-turn exchange at all.
 
+Four of the sessions are also *idle* in a way worth naming, because it is the
+reason the count is so low and it is invisible without looking at the
+timestamps. `3fec3f` sat for sixteen and a half hours between its opening and its
+single reply; `cd8bd5` for one hundred and seven minutes; `df67d7` for
+fifty-four. A session opened and left is a burnt record — it holds a real
+compose time and it is not a sample of a conversation, and the session clock
+correctly ends it the moment the learner returns. `probe:strain-data` now labels
+these and excludes them from the pool, because letting them in would be the one
+way the probe could lie convincingly. A session has to be started and finished
+in one sitting to be worth anything here.
+
 That session, `4d9c35`, is the only evidence available, and it is worth more than
 its size suggests. Its compose times were 24.3s, 57.6s and 67.9s — a monotonic
 rise across three consecutive turns — while its turn lengths stayed flat at six
