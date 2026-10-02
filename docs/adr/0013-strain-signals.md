@@ -103,13 +103,33 @@ is not a signal at all.**
    the transcript silently lies about. The scene brief changes to say that the
    remaining scenes are for the words the learner has already failed.
 
-   This is also why the gate is one boolean rather than a prompt change. ADR 0010
-   already made the prompt render a zero allowance as `new は0個` plus the deck
-   instruction, so forcing the allowance to zero is the whole of the mechanism and
-   `src/server/prompt.ts` is not touched at all. That is worth stating plainly,
-   because `prompt.ts` is the file this project treats as a silent-regression
-   hazard and every slice is expected to drive the app to check it. This one has
-   nothing to drive.
+   This is also why the gate itself is one boolean. ADR 0010 already made the
+   prompt render a zero allowance as `new は0個`, so forcing the allowance to zero
+   is the whole of the *stop*. The prompt does still change, and the reason is
+   worth recording because the first version of this ADR claimed it did not.
+
+   Stopping is only half of what the issue asks. "Spends the rest of the Session
+   on the Fumble Deck" is a different instruction from the ordinary one, not the
+   same one with a smaller number in it: the normal deck line offers a deck
+   marker as optional (`deck を0〜1`), and a session told `new は0個` alongside
+   `deck を0〜1` has been told to introduce nothing at all. Left as it was, a
+   strained session would not have shifted its budget anywhere — it would have
+   stopped spending words and started going quiet. So `markerHint` gained a
+   strain branch that requires a deck marker, and `src/server/prompt.ts` is
+   touched after all.
+
+   The branch has three cases rather than one "deck or revisit" line, because the
+   model follows a worked example far better than a disjunction, and because the
+   third case is the one that would otherwise fail quietly: a strained learner
+   with an empty deck has no deck word to aim at, so the fallback is the words
+   already met — the `revisit` machinery ADR 0010 built — and if there are none of
+   those either, the partner is told to keep the scene moving without markers
+   rather than being handed an instruction that produces an empty turn.
+
+   `strained` is passed to the prompt rather than inferred from a zero allowance.
+   The allowance also reaches zero for the ordinary reason, a scene that has used
+   its three words, and reading that as strain would push the Fumble Deck at every
+   capped scene in every healthy session.
 
 6. **A session that stopped early is a consolidation day, and says so.** The
    session record carries the flag, the coach rail reports words actually met
@@ -146,6 +166,20 @@ is not a signal at all.**
 
 ## Consequences
 
+- **`prompt.ts` is touched, so the app-level check this project requires applies to
+  it — and it could not be run.** The standing rule is that a change here is only
+  verified by driving the app, typing a deliberately bad turn, and watching the
+  deck count on the coach rail go up. That check is impossible on this build: the
+  gate is inert, so no real session can reach the strain branch. What was done
+  instead is the strongest check available without a strained session — the built
+  prompt was hashed for six ordinary contexts and four strained ones on both `main`
+  and this branch. All six ordinary digests were identical, all four strained
+  digests differed, and the strained closing line was identical to the ordinary
+  one. `src/server/prompt-strain.test.ts` keeps that as property tests rather than
+  as golden hashes, so a legitimate prompt edit does not break them.
+  The deck-count check is still owed, and the honest place to run it is the same
+  sitting that supplies the thresholds: a session the gate actually closed is
+  exactly the session to watch the deck in.
 - **The probe is a guard against a silent failure, not a convenience.** The failure
   mode it prevents is specific: practising five sessions, deriving nothing, and
   discovering too late that none of them had enough measured turns. It reads the

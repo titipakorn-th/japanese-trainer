@@ -73,14 +73,46 @@ function stanceLine(stance: Stance, word: WordSeed): string {
  * this turn's own share of it. Deck markers are budgeted separately and never
  * spend the New Word allowance, because a deck word is not a New Word: it is a
  * word the learner has already failed at and is owed another chance at.
+ *
+ * `strained` is passed rather than inferred from a zero allowance, and the
+ * distinction is load-bearing. The allowance also reaches zero for the ordinary
+ * reason — a scene that has used its three words — and a scene that has done
+ * that is a normal scene that should finish. Only a session the gate closed is
+ * one whose remaining budget should move to the deck. Reading one as the other
+ * would push the Fumble Deck at every capped scene in every healthy session.
  */
 function markerHint(
   moment: Moment,
   stance: Stance,
   hasDeck: boolean,
   allowance: { thisSprint: number; thisTurn: number },
+  strained = false,
+  hasMet = false,
 ): string {
   if (moment === "closing") return "今回は0個。";
+
+  // A strained session spends what is left on the words the learner has already
+  // failed. This is the second half of issue #10's stop condition and it is not
+  // the same instruction as a normal turn: the ordinary deck line offers a deck
+  // marker as optional ("0〜1"), and a session that has stopped injecting would
+  // then simply stop introducing anything at all.
+  //
+  // The three cases are separate rather than one "deck or revisit" line because
+  // the model follows a worked example and an explicit instruction far better
+  // than a disjunction, and because the third case is the one that would
+  // otherwise go quiet: a learner with an empty deck who is also showing strain
+  // has no deck word to aim at, and telling them to mark nothing at all is how a
+  // scene goes flat.
+  if (strained) {
+    if (hasDeck) {
+      return "new は0個。残りの場面は deck の語を出す場面。deck を必ず1つ、本文に自然に入れて deck のマーカーで囲む。";
+    }
+    if (hasMet) {
+      return "new は0個。残りの場面は、すでに出した語を使う場面。上の今日出した語のどれかを別の文でもう一度使って revisit のマーカーで印をつける。";
+    }
+    return "new は0個。今日は新しい語を増やさない。学習者がすでに言える言葉で場面を前に進める。印は付けなくていい。";
+  }
+
   const deck = hasDeck ? "deck を0〜1。本文にこの語が入ったら必ず deck で印をつける。" : "";
   // The opening is the only moment where the brief itself does not yet require
   // anything of the learner, so it is also the only moment we can use to
@@ -240,11 +272,23 @@ export interface PromptContext {
    * word is not worth a stalled scene.
    */
   allowance: { thisSprint: number; thisTurn: number };
+
+  /**
+   * Whether the session is under strain and has stopped spending New Words.
+   *
+   * The gate itself lives in `strain.ts` and is read fresh on every call, so this
+   * is a statement about the transcript as it stands rather than a latch. It is
+   * `false` on any build whose thresholds are not yet calibrated, and then this
+   * whole branch is unreachable and the prompt is byte-for-byte what it was.
+   * See `docs/adr/0013-strain-signals.md`.
+   */
+  strained?: boolean;
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { brief, moment, stance, earlier, deckWords, grammarPoint, metWords: met, allowance } =
     ctx;
+  const strained = ctx.strained === true;
   const { word } = brief;
 
   const example = moment === "closing" ? brief.closingLine : brief.openingLine;
@@ -358,7 +402,7 @@ markers: 本文にそのまま現れる語に印をつける。surface は本文
   "new" は今日の場面が初出の語。"deck" は学習者のデッキにある語で、 本文に出てきたら必ず deck で印をつける（"new"ではない）。
   "revisit" は上の「今日すでに出した語」のどれかを別の文で使ったとき。"new" にはしない。reading / meaning / example は必ず空文字。
   "grammar" は今日の文型がそのまま表れている語句に印をつける。${grammarPoint ? `「${grammarPoint.name}」の形が使われたとき、その語句を surface にする。` : ""}
-  ${markerHint(moment, stance, deckWords.length > 0, allowance)}
+  ${markerHint(moment, stance, deckWords.length > 0, allowance, strained, met.length > 0)}
 
 fumbles: 学習者の今回の一言からfumれた瞬間を報告する。一件もない時は空配列。
   - surface: 学習者の発言に実在する文字列（マーカーで囲む部分）。発言全体がfumれた時は空文字。

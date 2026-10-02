@@ -186,14 +186,19 @@ function wordContext(
   sprint: Sprint | null,
   sprints: Sprint[],
   moment: Moment,
-): Pick<PromptContext, "metWords" | "allowance"> {
+): Pick<PromptContext, "metWords" | "allowance" | "strained"> {
   const turns = getTurns(sessionId);
+  // One read of the gate, used for both the allowance and the prompt, so the
+  // two cannot disagree about whether this session is strained. Two separate
+  // calls would be two answers to the same question on the same turn.
+  const strained = isStrained(turns, getSessionFumbles(sessionId));
   return {
     // A closing line is the one moment with no room for a revisit: it is one
     // short sign-off, and a word woven into it is a word used in the least
     // useful sentence in the sprint.
     metWords: moment === "closing" ? [] : metWords(turns),
-    allowance: newWordAllowance(turns, sprint, sprints, isStrained(turns, getSessionFumbles(sessionId))),
+    allowance: newWordAllowance(turns, sprint, sprints, strained),
+    strained,
   };
 }
 
