@@ -24,7 +24,9 @@ checks the schema they leave. See `docs/adr/0009-cold-start-migration.md` — an
 `npm run probe:cold-start`, which walks the path from tapping Start to a
 readable first line against a running server and prints the breakdown against the
 ten-second budget. Point it at a throwaway store so probing does not litter the
-learner's history:
+learner's history — and `npm run probe:reading-aid`, which checks that the reveal
+set lives on the server and that one renderer draws it. See below for why that one
+exists:
 
 ```sh
 DATABASE_FILE=probe.db npm start &
@@ -47,6 +49,29 @@ Every button is simply dead: no composer, no toggle, no tap target, no error
 anywhere in the UI. The only evidence is one 500 in the console, and it reads like
 a missing asset rather than a build lifecycle mistake — which is how a working
 toggle got mistaken for a broken one here. Stop the server, build, then start it.
+
+## The reading aid has no test seam of its own, so it gets a probe
+
+`#9` shipped closed with all eight acceptance criteria ticked and the central one
+false. The reveal set was `sessionStorage`; the `/revealed` endpoint, the
+`revealed_readings` column and `addRevealedReading()` were all unreachable because
+no client code called them. The only test of it had hit the route directly rather
+than through the client, so it passed against a path no user ever takes — and the
+conversation looked fine throughout, because a tap target still rendered and
+still revealed. It just died with the tab.
+
+That is the shape of failure worth a guard: **correct on the server, absent on the
+client, invisible in the product.** Nothing else in the app notices.
+
+`npm run probe:reading-aid` asserts the invariant — the reveal set is server-owned,
+one renderer draws it, and the streaming path receives the furigana props it needs
+to make a hard word tappable rather than dead. It runs the real server functions
+against a scratch store, and reads the client source for the client half.
+
+Be clear about what that second half is: it is structural, so it catches these
+regressions and will not catch a client that calls the endpoint in a way that
+never round-trips. The server half passing while the client is broken is exactly
+what happened here, and no amount of server-side testing would have shown it.
 
 ## Architecture
 
