@@ -4,6 +4,19 @@ import { pacing, sprintsPerSession } from "@/server/pacing";
 import { startStats } from "@/server/stats";
 
 /**
+ * This screen is rendered per request, never at build time.
+ *
+ * Nothing here says "static", but the page is a plain synchronous server
+ * component, so Next prerenders it — and a prerendered start screen freezes the
+ * two numbers the learner reads to decide what they are walking into. A learner
+ * who worked through the deck and came back would be told the deck was empty,
+ * because the copy on the server was written once when the image was built. The
+ * numbers are the whole point of putting them on this screen, so they have to be
+ * read when the screen is.
+ */
+export const dynamic = "force-dynamic";
+
+/**
  * The scenarios are catalogued on the server and rendered here, so the learner
  * sees the real list and the real budgets rather than a copy the browser could
  * drift from. The shape of a session — how many scenes, how long in total — is

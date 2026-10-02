@@ -48,7 +48,18 @@ export function SessionView({ initial }: { initial: SessionState }) {
     initial.session.status === "ended" || initial.activeSprint === null,
   );
   const noScene = initial.session.status === "active" && initial.activeSprint === null;
-  const [abandoned, setAbandoned] = useState(false);
+  /**
+   * Whether the learner walked away from this session, read off the sprints.
+   *
+   * This was a local flag set by the End button, which is the one piece of the
+   * wrap-up a reload could not reproduce: the server records why each scene
+   * closed, but the flag did not, so the same finished page said "Ended early"
+   * the moment you ended it and "That's the session" after a reload of that very
+   * page. Derived here for the same reason `ended` is: a reload has to agree with
+   * the live view, and only server state survives one.
+   */
+  const lastClosed = [...sprints].reverse().find((s) => s.status === "closed");
+  const abandoned = lastClosed?.endedBy === "abandoned";
   const [draft, setDraft] = useState("");
   const [pendingLearner, setPendingLearner] = useState<string | null>(null);
   const [latency, setLatency] = useState<number | null>(null);
@@ -233,12 +244,8 @@ export function SessionView({ initial }: { initial: SessionState }) {
   const end = useCallback(async () => {
     if (busy) return;
     if (pendingDrill) return;
-    setAbandoned(true);
     const response = await fetch(`/api/sessions/${session.id}`, { method: "DELETE" });
-    if (!response.ok) {
-      setAbandoned(false);
-      return;
-    }
+    if (!response.ok) return;
     const state = (await response.json()) as SessionState;
     setSprints(state.sprints);
     setActive(null);
